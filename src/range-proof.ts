@@ -387,6 +387,9 @@ export function createRangeProof(value: number, min: number, max: number, bindin
   if (max < min) throw new ValidationError('Maximum must be >= minimum');
   if (value < min || value > max) throw new ValidationError('Value is not within the specified range');
 
+  if (bindingContext !== undefined && bindingContext.length > MAX_CONTEXT_BYTES) {
+    throw new ValidationError('Binding context exceeds maximum length (1024 bytes)');
+  }
   const context = bindingContext ? utf8ToBytes(bindingContext) : EMPTY_CONTEXT;
   if (context.length > MAX_CONTEXT_BYTES) throw new ValidationError('Binding context exceeds maximum length (1024 bytes)');
 
@@ -472,6 +475,7 @@ export function createRangeProof(value: number, min: number, max: number, bindin
 export function verifyRangeProof(proof: RangeProof): boolean {
   try {
     const { min, max, bits, lowerProof, upperProof } = proof;
+    if (proof.context && proof.context.length > MAX_CONTEXT_BYTES) return false;
     const context = proof.context ? utf8ToBytes(proof.context) : EMPTY_CONTEXT;
     if (context.length > MAX_CONTEXT_BYTES) return false;
 
@@ -662,8 +666,9 @@ export function deserializeRangeProof(json: string): RangeProof {
   if (p.context !== undefined && typeof p.context !== 'string') {
     throw new ValidationError('Invalid range proof: context must be a string if present');
   }
-  if (typeof p.context === 'string' && utf8ToBytes(p.context).length > MAX_CONTEXT_BYTES) {
-    throw new ValidationError('Invalid range proof: context exceeds maximum length (1024 bytes)');
+  if (typeof p.context === 'string') {
+    if (p.context.length > MAX_CONTEXT_BYTES) throw new ValidationError('Invalid range proof: context exceeds maximum length (1024 bytes)');
+    if (utf8ToBytes(p.context).length > MAX_CONTEXT_BYTES) throw new ValidationError('Invalid range proof: context exceeds maximum length (1024 bytes)');
   }
   // Construct from whitelisted fields to prevent prototype pollution via __proto__/constructor keys
   const bitProofMapper = (bp: unknown): BitProof => {
