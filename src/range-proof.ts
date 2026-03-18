@@ -23,9 +23,22 @@ function pointToBytes(p: ProjectivePoint): Uint8Array {
 
 const DOMAIN_BIT_PROOF = 'pedersen-bit-proof-v1';
 const DOMAIN_SUM_BINDING = 'pedersen-sum-binding-v1';
+const DOMAIN_COMMITMENT_BINDING = 'pedersen-commitment-binding-v1';
 
 /** Empty context (no binding) */
 const EMPTY_CONTEXT = new Uint8Array(0);
+
+/** Hex validation patterns */
+const HEX_COMPRESSED_POINT = /^(?:02|03)[0-9a-f]{64}$/i;
+const HEX_SCALAR_64 = /^[0-9a-f]{64}$/i;
+
+function isValidCompressedPoint(hex: string): boolean {
+  return HEX_COMPRESSED_POINT.test(hex);
+}
+
+function isValidScalarHex(hex: string): boolean {
+  return HEX_SCALAR_64.test(hex);
+}
 
 // --- Pedersen Commitment ---
 
@@ -44,6 +57,9 @@ export interface PedersenCommitment {
  * @param blinding - Optional blinding factor (random if not provided)
  */
 export function commit(value: number, blinding?: bigint): PedersenCommitment {
+  if (!Number.isSafeInteger(value)) throw new ValidationError('Value must be a safe integer');
+  if (value < 0) throw new ValidationError('Value must be non-negative');
+
   const v = BigInt(value);
   const r = blinding ?? randomScalar();
 
@@ -232,6 +248,10 @@ export interface RangeProof {
   /** Sum-binding proof: DLog of (lowerC + upperC - range*G) w.r.t. H */
   sumBindingE: string;
   sumBindingS: string;
+  /** Commitment-binding proof: DLog of (C - lowerC - min*G) w.r.t. H.
+   *  Proves C is algebraically bound to the verified lowerCommitment. */
+  commitBindingE: string;
+  commitBindingS: string;
   /** Optional binding context (e.g. subject pubkey hex) included in Fiat-Shamir
    *  challenges to prevent proof transplanting between credentials. */
   context?: string;
@@ -295,6 +315,53 @@ function verifySumBinding(
 }
 
 /**
+ * Prove knowledge of the discrete log of D w.r.t. H (commitment binding).
+ * D = C - lowerC - min*G = (r - r_lower)*H, proving C is bound to lowerC.
+ */
+function proveCommitmentBinding(
+  rDiff: bigint,
+  D: ProjectivePoint,
+  context: Uint8Array = EMPTY_CONTEXT
+): { e: string; s: string } {
+  const k = randomScalar();
+  const R = safeMultiply(H, k);
+
+  const e = hashToScalar(
+    utf8ToBytes(DOMAIN_COMMITMENT_BINDING),
+    context,
+    pointToBytes(D),
+    pointToBytes(R)
+  );
+
+  const s = mod(k - mod(e * rDiff));
+
+  return { e: scalarToHex(e), s: scalarToHex(s) };
+}
+
+function verifyCommitmentBinding(
+  D: ProjectivePoint,
+  eHex: string,
+  sHex: string,
+  context: Uint8Array = EMPTY_CONTEXT
+): boolean {
+  try {
+    const e = hexToScalar(eHex);
+    const s = hexToScalar(sHex);
+
+    const R = safeMultiply(H, s).add(safeMultiply(D, e));
+    const eCheck = hashToScalar(
+      utf8ToBytes(DOMAIN_COMMITMENT_BINDING),
+      context,
+      pointToBytes(D),
+      pointToBytes(R)
+    );
+    return scalarEqual(eCheck, e);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Create a range proof proving value ∈ [min, max].
  *
  * @param value - The secret value
@@ -310,7 +377,7 @@ export function createRangeProof(value: number, min: number, max: number, bindin
   }
   if (min < 0) throw new ValidationError('Minimum must be non-negative');
   if (max < min) throw new ValidationError('Maximum must be >= minimum');
-  if (value < min || value > max) throw new ValidationError(`Value ${value} not in range [${min}, ${max}]`);
+  if (value < min || value > max) throw new ValidationError('Value is not within the specified range');
 
   const context = bindingContext ? utf8ToBytes(bindingContext) : EMPTY_CONTEXT;
 
@@ -363,6 +430,13 @@ export function createRangeProof(value: number, min: number, max: number, bindin
   const D = lowerC.add(upperC).add(rangeG.negate());
   const sumBinding = proveSumBinding(rTotal, D, context);
 
+  // Commitment-binding proof: prove C - lowerC - min*G = (r - r_lower)*H
+  // This binds the overall commitment to the verified lower commitment
+  const rDiff = mod(blinding - lowerBlindingSum);
+  const minG = safeMultiply(G, BigInt(min));
+  const commitD = C.add(lowerC.negate()).add(minG.negate());
+  const commitBinding = proveCommitmentBinding(rDiff, commitD, context);
+
   return {
     commitment: C.toHex(true),
     min,
@@ -374,6 +448,8 @@ export function createRangeProof(value: number, min: number, max: number, bindin
     upperCommitment: upperC.toHex(true),
     sumBindingE: sumBinding.e,
     sumBindingS: sumBinding.s,
+    commitBindingE: commitBinding.e,
+    commitBindingS: commitBinding.s,
     context: bindingContext,
   };
 }
@@ -441,6 +517,16 @@ export function verifyRangeProof(proof: RangeProof): boolean {
       return false;
     }
 
+    // 6. Verify commitment-binding: C - lowerC - min*G = (r - r_lower)*H
+    // This proves the overall commitment is algebraically bound to the verified lower commitment
+    const C = Point.fromHex(proof.commitment);
+    C.assertValidity();
+    const minG = safeMultiply(G, BigInt(min));
+    const commitD = C.add(lowerC.negate()).add(minG.negate());
+    if (!verifyCommitmentBinding(commitD, proof.commitBindingE, proof.commitBindingS, context)) {
+      return false;
+    }
+
     return true;
   } catch {
     return false;
@@ -456,19 +542,22 @@ export function verifyRangeProof(proof: RangeProof): boolean {
  * @returns The range proof
  */
 export function createAgeRangeProof(age: number, ageRange: string, subjectPubkey?: string): RangeProof {
+  const DIGITS_ONLY = /^\d+$/;
+
   // Handle "18+" format (no upper bound — use 150 as practical max)
   if (ageRange.endsWith('+')) {
-    const min = parseInt(ageRange.slice(0, -1), 10);
-    if (isNaN(min)) throw new ValidationError(`Invalid age range format: ${ageRange}`);
-    return createRangeProof(age, min, 150, subjectPubkey);
+    const minStr = ageRange.slice(0, -1);
+    if (!DIGITS_ONLY.test(minStr)) throw new ValidationError(`Invalid age range format: ${ageRange}`);
+    return createRangeProof(age, parseInt(minStr, 10), 150, subjectPubkey);
   }
 
   const parts = ageRange.split('-');
   if (parts.length !== 2) throw new ValidationError(`Invalid age range format: ${ageRange} (expected "min-max")`);
+  if (!DIGITS_ONLY.test(parts[0]) || !DIGITS_ONLY.test(parts[1])) {
+    throw new ValidationError(`Invalid age range format: ${ageRange}`);
+  }
   const min = parseInt(parts[0], 10);
   const max = parseInt(parts[1], 10);
-
-  if (isNaN(min) || isNaN(max)) throw new ValidationError(`Invalid age range format: ${ageRange}`);
 
   return createRangeProof(age, min, max, subjectPubkey);
 }
@@ -508,6 +597,9 @@ export function deserializeRangeProof(json: string): RangeProof {
   if (typeof p.bits !== 'number' || typeof p.commitment !== 'string') {
     throw new ValidationError('Invalid range proof: missing bits or commitment');
   }
+  if (!isValidCompressedPoint(p.commitment as string)) {
+    throw new ValidationError('Invalid range proof: commitment is not valid compressed-point hex');
+  }
   if (!Number.isSafeInteger(p.bits) || (p.bits as number) < 1 || (p.bits as number) > 32) {
     throw new ValidationError('Invalid range proof: bits must be between 1 and 32');
   }
@@ -520,8 +612,20 @@ export function deserializeRangeProof(json: string): RangeProof {
   if (typeof p.lowerCommitment !== 'string' || typeof p.upperCommitment !== 'string') {
     throw new ValidationError('Invalid range proof: missing lowerCommitment/upperCommitment');
   }
+  if (!isValidCompressedPoint(p.lowerCommitment as string) || !isValidCompressedPoint(p.upperCommitment as string)) {
+    throw new ValidationError('Invalid range proof: lowerCommitment/upperCommitment is not valid compressed-point hex');
+  }
   if (typeof p.sumBindingE !== 'string' || typeof p.sumBindingS !== 'string') {
     throw new ValidationError('Invalid range proof: missing sumBindingE/sumBindingS');
+  }
+  if (!isValidScalarHex(p.sumBindingE as string) || !isValidScalarHex(p.sumBindingS as string)) {
+    throw new ValidationError('Invalid range proof: sumBindingE/sumBindingS is not valid scalar hex');
+  }
+  if (typeof p.commitBindingE !== 'string' || typeof p.commitBindingS !== 'string') {
+    throw new ValidationError('Invalid range proof: missing commitBindingE/commitBindingS');
+  }
+  if (!isValidScalarHex(p.commitBindingE as string) || !isValidScalarHex(p.commitBindingS as string)) {
+    throw new ValidationError('Invalid range proof: commitBindingE/commitBindingS is not valid scalar hex');
   }
   // Validate bit proof array contents
   for (const bp of [...(p.lowerProof as unknown[]), ...(p.upperProof as unknown[])]) {
@@ -530,6 +634,13 @@ export function deserializeRangeProof(json: string): RangeProof {
     if (typeof bpRec.commitment !== 'string' || typeof bpRec.e0 !== 'string' ||
         typeof bpRec.s0 !== 'string' || typeof bpRec.e1 !== 'string' || typeof bpRec.s1 !== 'string') {
       throw new ValidationError('Invalid range proof: bit proof missing required fields');
+    }
+    if (!isValidCompressedPoint(bpRec.commitment as string)) {
+      throw new ValidationError('Invalid range proof: bit proof commitment is not valid compressed-point hex');
+    }
+    if (!isValidScalarHex(bpRec.e0 as string) || !isValidScalarHex(bpRec.s0 as string) ||
+        !isValidScalarHex(bpRec.e1 as string) || !isValidScalarHex(bpRec.s1 as string)) {
+      throw new ValidationError('Invalid range proof: bit proof scalar is not valid hex');
     }
   }
   if (p.context !== undefined && typeof p.context !== 'string') {

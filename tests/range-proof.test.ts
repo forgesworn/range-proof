@@ -58,11 +58,11 @@ describe('range-proof', () => {
     });
 
     it('rejects value below range', () => {
-      expect(() => createRangeProof(4, 5, 10)).toThrow('not in range');
+      expect(() => createRangeProof(4, 5, 10)).toThrow('not within the specified range');
     });
 
     it('rejects value above range', () => {
-      expect(() => createRangeProof(11, 5, 10)).toThrow('not in range');
+      expect(() => createRangeProof(11, 5, 10)).toThrow('not within the specified range');
     });
 
     it('proves single-value range', () => {
@@ -155,6 +155,113 @@ describe('range-proof', () => {
       const proof = createRangeProof(5, 0, 10);
       const tampered = { ...proof, bits: proof.bits + 1 };
       expect(verifyRangeProof(tampered)).toBe(false);
+    });
+
+    it('rejects commitment substitution (commitment not bound to sub-proofs)', () => {
+      // Create two proofs for different values in the same range
+      const proofA = createRangeProof(7, 0, 15);
+      const proofB = createRangeProof(3, 0, 15);
+
+      // Swap the commitment — sub-proofs stay from proofA but commitment from proofB
+      const tampered = { ...proofA, commitment: proofB.commitment };
+      expect(verifyRangeProof(tampered)).toBe(false);
+    });
+
+    it('rejects commitment substitution even when range and min match', () => {
+      // Same range, different values — commitment binding must still catch it
+      const proof1 = createRangeProof(6, 5, 10);
+      const proof2 = createRangeProof(8, 5, 10);
+
+      const tampered = { ...proof1, commitment: proof2.commitment };
+      expect(verifyRangeProof(tampered)).toBe(false);
+    });
+
+    it('commit() rejects negative values', () => {
+      expect(() => commit(-1)).toThrow('Value must be non-negative');
+      expect(() => commit(-100)).toThrow('Value must be non-negative');
+    });
+
+    it('commit() rejects non-integer values', () => {
+      expect(() => commit(3.14)).toThrow('Value must be a safe integer');
+      expect(() => commit(NaN)).toThrow('Value must be a safe integer');
+      expect(() => commit(Infinity)).toThrow('Value must be a safe integer');
+    });
+
+    it('commit() rejects values beyond Number.MAX_SAFE_INTEGER', () => {
+      expect(() => commit(Number.MAX_SAFE_INTEGER + 1)).toThrow('Value must be a safe integer');
+    });
+
+    it('error message does not leak the secret value', () => {
+      const secretValue = 42;
+      try {
+        createRangeProof(secretValue, 100, 200);
+        expect.unreachable('should have thrown');
+      } catch (err) {
+        const message = (err as Error).message;
+        expect(message).not.toContain(String(secretValue));
+        expect(message).not.toContain('42');
+        // Ensure it also does not contain the range bounds in a way that leaks structure
+        expect(message).toBe('Value is not within the specified range');
+      }
+    });
+
+    it('deserialisation rejects malformed hex in commitment', () => {
+      const proof = createRangeProof(7, 5, 10);
+      const json = serializeRangeProof(proof);
+      const obj = JSON.parse(json);
+
+      // Invalid prefix (not 02 or 03)
+      obj.commitment = '04' + 'ab'.repeat(32);
+      expect(() => deserializeRangeProof(JSON.stringify(obj))).toThrow('not valid compressed-point hex');
+    });
+
+    it('deserialisation rejects short hex in commitment', () => {
+      const proof = createRangeProof(7, 5, 10);
+      const json = serializeRangeProof(proof);
+      const obj = JSON.parse(json);
+
+      obj.commitment = '02abcd';
+      expect(() => deserializeRangeProof(JSON.stringify(obj))).toThrow('not valid compressed-point hex');
+    });
+
+    it('deserialisation rejects non-hex characters in scalar fields', () => {
+      const proof = createRangeProof(7, 5, 10);
+      const json = serializeRangeProof(proof);
+      const obj = JSON.parse(json);
+
+      obj.sumBindingE = 'zz' + '00'.repeat(31);
+      expect(() => deserializeRangeProof(JSON.stringify(obj))).toThrow('not valid scalar hex');
+    });
+
+    it('deserialisation rejects malformed hex in bit proof commitment', () => {
+      const proof = createRangeProof(7, 5, 10);
+      const json = serializeRangeProof(proof);
+      const obj = JSON.parse(json);
+
+      obj.lowerProof[0].commitment = 'not-hex';
+      expect(() => deserializeRangeProof(JSON.stringify(obj))).toThrow('not valid compressed-point hex');
+    });
+
+    it('deserialisation rejects malformed hex in bit proof scalar', () => {
+      const proof = createRangeProof(7, 5, 10);
+      const json = serializeRangeProof(proof);
+      const obj = JSON.parse(json);
+
+      obj.lowerProof[0].e0 = 'xyz';
+      expect(() => deserializeRangeProof(JSON.stringify(obj))).toThrow('not valid hex');
+    });
+
+    it('age range parser rejects non-numeric segments', () => {
+      expect(() => createAgeRangeProof(10, 'abc-12')).toThrow('Invalid age range format');
+      expect(() => createAgeRangeProof(10, '8-xyz')).toThrow('Invalid age range format');
+      expect(() => createAgeRangeProof(10, '8.5-12')).toThrow('Invalid age range format');
+      expect(() => createAgeRangeProof(20, 'abc+')).toThrow('Invalid age range format');
+      expect(() => createAgeRangeProof(20, '18.5+')).toThrow('Invalid age range format');
+    });
+
+    it('age range parser rejects segments with leading hex-like content', () => {
+      // parseInt('0x12', 10) returns 0, which could silently produce wrong ranges
+      expect(() => createAgeRangeProof(10, '0x8-12')).toThrow('Invalid age range format');
     });
   });
 });
