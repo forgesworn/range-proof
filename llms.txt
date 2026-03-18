@@ -1,0 +1,83 @@
+# secp256k1-range-proof
+
+> Zero-knowledge range proofs on secp256k1 — prove a value lies within a range without revealing it, built on Pedersen commitments and @noble/curves.
+
+## Getting Started
+
+Install from npm:
+
+```bash
+npm install secp256k1-range-proof
+```
+
+ESM-only. Requires Node.js 18+. Sole runtime dependencies: `@noble/curves` and `@noble/hashes`.
+
+Prove a value is in range:
+
+```typescript
+import { createRangeProof, verifyRangeProof } from 'secp256k1-range-proof';
+
+const proof = createRangeProof(25, 18, 150);
+const valid = verifyRangeProof(proof); // true
+```
+
+Bind a proof to a subject identity (prevents transplant attacks):
+
+```typescript
+const proof = createRangeProof(25, 18, 150, 'subject-pubkey-hex');
+```
+
+## Key Concepts
+
+### Pedersen Commitments
+
+A Pedersen commitment `C = v*G + r*H` hides a value `v` behind a random blinding factor `r`. The second generator `H` is a nothing-up-my-sleeve point derived by hashing `'secp256k1-pedersen-H-v1'` to a curve point — nobody knows `log_G(H)`, which is essential for security. Commitments are computationally binding and perfectly hiding.
+
+### Range Proofs
+
+The library uses CDS OR-composition (Cramer-Damgard-Schoenmakers) to prove each bit of a decomposed value is 0 or 1, then ties the bits to the overall range constraint with sum-binding and commitment-binding Schnorr proofs. Fiat-Shamir domain separators (`pedersen-bit-proof-v1`, `pedersen-sum-binding-v1`, `pedersen-commitment-binding-v1`) make the interactive proofs non-interactive. Maximum range: 2^32.
+
+### Binding Context
+
+An optional context string is included in all Fiat-Shamir challenges, binding the proof to a specific credential or identity. A proof created with one context will not verify under a different context.
+
+## API Surface
+
+### Core Functions
+
+- `createRangeProof(value, min, max, bindingContext?)` — prove `value` is in `[min, max]`
+- `verifyRangeProof(proof)` — verify a range proof (returns boolean)
+- `createAgeRangeProof(age, ageRange, subjectPubkey?)` — convenience wrapper accepting `'18+'` or `'8-12'` format
+- `verifyAgeRangeProof(proof)` — verify an age range proof
+
+### Pedersen Commitments
+
+- `commit(value, blinding?)` — create a Pedersen commitment; returns `{ commitment, blinding, value }`
+- `verifyCommitment(commitment, value, blinding)` — open and verify a commitment
+
+### Serialisation
+
+- `serializeRangeProof(proof)` — serialise a proof to JSON string
+- `deserializeRangeProof(json)` — deserialise with full input validation (rejects malformed hex, oversized arrays, invalid points)
+
+### Types
+
+- `RangeProof` — the proof object (commitment, min, max, bits, bit proofs, binding proofs, optional context)
+- `PedersenCommitment` — `{ commitment: string, blinding: string, value: number }`
+
+### Error Classes
+
+- `RangeProofError` — base class
+- `ValidationError` — malformed inputs, out-of-range values, bad JSON
+- `CryptoError` — range too large, cryptographic failures
+
+## When To Use This
+
+Use `secp256k1-range-proof` when you need to prove a numeric value falls within a range without revealing the exact value:
+
+- **Age verification** — prove a user is 18+ without revealing their birth date
+- **Income or credit checks** — prove a score exceeds a threshold without disclosing the number
+- **Salary negotiation** — prove a salary falls within a band without naming the figure
+- **Privacy-preserving credentials** — bind proofs to subject identities to prevent transplant attacks
+
+The library is pure TypeScript, ESM-only, and delegates all elliptic curve operations to `@noble/curves` (audited, widely trusted). It is suitable for browser and Node.js environments.
