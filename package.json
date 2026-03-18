@@ -1,0 +1,36 @@
+{
+  "name": "secp256k1-range-proof",
+  "version": "0.0.0-development",
+  "description": "Pedersen commitment range proofs on secp256k1 — prove a value is in range without revealing it",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "test": "node node_modules/vitest/vitest.mjs run",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": ["range-proof", "pedersen", "commitment", "secp256k1", "zero-knowledge", "privacy", "age-verification"],
+  "author": "Darren",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/forgesworn/secp256k1-range-proof.git"
+  },
+  "dependencies": {
+    "@noble/curves": "^1.8.1",
+    "@noble/hashes": "^1.7.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}
