@@ -1,3 +1,14 @@
+## [1.0.1](https://github.com/forgesworn/range-proof/compare/v1.0.0...v1.0.1) (2026-03-18)
+
+
+### Bug Fixes
+
+* add credential file patterns to .gitignore ([1098889](https://github.com/forgesworn/range-proof/commit/109888969be38aa245f55d306e93c533c4a5b60f))
+* address re-review findings ([03280e9](https://github.com/forgesworn/range-proof/commit/03280e969ae87f2f08eb20e0a6140a8a650aedfe))
+* early-reject oversized context strings before UTF-8 conversion ([98d8adf](https://github.com/forgesworn/range-proof/commit/98d8adfaac9e6c399813c7618c4449a49f08f164))
+* harden input validation, prevent prototype pollution in deserialiser ([81a12ac](https://github.com/forgesworn/range-proof/commit/81a12ac3bdada5304e2ec0bea4c04f33dc8e8433))
+* pin GitHub Actions to SHA, remove unused permissions, pin npm version ([f9c8209](https://github.com/forgesworn/range-proof/commit/f9c82099dc74aebdfb642021808dee93e65ba2a4))
+
 # 1.0.0 (2026-03-18)
 
 

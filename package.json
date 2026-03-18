@@ -1,6 +1,6 @@
 {
   "name": "@forgesworn/range-proof",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Pedersen commitment range proofs on secp256k1 — prove a value is in range without revealing it",
   "type": "module",
   "main": "./dist/index.js",
