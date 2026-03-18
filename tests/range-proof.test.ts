@@ -263,5 +263,102 @@ describe('range-proof', () => {
       // parseInt('0x12', 10) returns 0, which could silently produce wrong ranges
       expect(() => createAgeRangeProof(10, '0x8-12')).toThrow('Invalid age range format');
     });
+
+    it('age range error does not reflect user input', () => {
+      try {
+        createAgeRangeProof(10, '<script>alert(1)</script>');
+        expect.unreachable('should have thrown');
+      } catch (err) {
+        expect((err as Error).message).not.toContain('<script>');
+      }
+    });
+
+    it('commit() rejects zero blinding factor', () => {
+      expect(() => commit(42, 0n)).toThrow('Blinding factor must be non-zero');
+    });
+
+    it('verifyCommitment throws on wrong types', () => {
+      expect(() => verifyCommitment(123 as unknown as string, 42, 'ff'.repeat(32))).toThrow('commitment must be a string');
+      expect(() => verifyCommitment('02' + 'ab'.repeat(32), 3.14, 'ff'.repeat(32))).toThrow('value must be a safe integer');
+      expect(() => verifyCommitment('02' + 'ab'.repeat(32), 42, 123 as unknown as string)).toThrow('blinding must be a string');
+    });
+
+    it('verifyRangeProof rejects non-safe-integer min/max', () => {
+      const proof = createRangeProof(5, 0, 10);
+      expect(verifyRangeProof({ ...proof, min: 1.5 })).toBe(false);
+      expect(verifyRangeProof({ ...proof, max: NaN })).toBe(false);
+      expect(verifyRangeProof({ ...proof, min: -1 })).toBe(false);
+    });
+
+    it('verifyRangeProof rejects tampered sumBinding scalars', () => {
+      const proof = createRangeProof(7, 5, 10);
+      expect(verifyRangeProof({ ...proof, sumBindingE: '00'.repeat(32) })).toBe(false);
+      expect(verifyRangeProof({ ...proof, sumBindingS: '00'.repeat(32) })).toBe(false);
+    });
+
+    it('verifyRangeProof rejects tampered commitBinding scalars', () => {
+      const proof = createRangeProof(7, 5, 10);
+      expect(verifyRangeProof({ ...proof, commitBindingE: '00'.repeat(32) })).toBe(false);
+      expect(verifyRangeProof({ ...proof, commitBindingS: '00'.repeat(32) })).toBe(false);
+    });
+
+    it('verifyRangeProof rejects tampered bit proof scalar', () => {
+      const proof = createRangeProof(7, 5, 10);
+      const tampered = { ...proof, lowerProof: [...proof.lowerProof] };
+      tampered.lowerProof[0] = { ...tampered.lowerProof[0], e0: '00'.repeat(32) };
+      expect(verifyRangeProof(tampered)).toBe(false);
+    });
+
+    it('deserialisation strips __proto__ and extra keys (prototype pollution prevention)', () => {
+      const proof = createRangeProof(7, 5, 10);
+      const json = serializeRangeProof(proof);
+      const obj = JSON.parse(json);
+      obj.__proto__ = { isAdmin: true };
+      obj.extraField = 'should be dropped';
+      const deserialized = deserializeRangeProof(JSON.stringify(obj));
+      expect((deserialized as unknown as Record<string, unknown>)['extraField']).toBeUndefined();
+      expect(verifyRangeProof(deserialized)).toBe(true);
+    });
+
+    it('deserialisation rejects bits inconsistent with range', () => {
+      const proof = createRangeProof(7, 5, 10);
+      const json = serializeRangeProof(proof);
+      const obj = JSON.parse(json);
+      obj.bits = 1;
+      expect(() => deserializeRangeProof(JSON.stringify(obj))).toThrow('bits does not match range');
+    });
+
+    it('deserialisation rejects proof array length inconsistent with bits', () => {
+      const proof = createRangeProof(7, 5, 10);
+      const json = serializeRangeProof(proof);
+      const obj = JSON.parse(json);
+      obj.lowerProof = obj.lowerProof.slice(0, 1);
+      expect(() => deserializeRangeProof(JSON.stringify(obj))).toThrow('proof array length does not match bits');
+    });
+
+    it('rejects binding context exceeding maximum length', () => {
+      const longContext = 'x'.repeat(2000);
+      expect(() => createRangeProof(7, 5, 10, longContext)).toThrow('context exceeds maximum length');
+    });
+
+    it('serialisation round-trip with binding context preserves context', () => {
+      const proof = createRangeProof(7, 5, 10, 'pubkey_A');
+      const json = serializeRangeProof(proof);
+      const deserialized = deserializeRangeProof(json);
+      expect(deserialized.context).toBe('pubkey_A');
+      expect(verifyRangeProof(deserialized)).toBe(true);
+    });
+
+    it('proves value = 0 in range [0, 7]', () => {
+      const proof = createRangeProof(0, 0, 7);
+      expect(verifyRangeProof(proof)).toBe(true);
+    });
+
+    it('verifyRangeProof rejects proof created without context verified with injected context', () => {
+      const proof = createRangeProof(7, 5, 10);
+      expect(proof.context).toBeUndefined();
+      const injected = { ...proof, context: 'injected' };
+      expect(verifyRangeProof(injected)).toBe(false);
+    });
   });
 });
