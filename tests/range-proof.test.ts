@@ -280,6 +280,7 @@ describe('range-proof', () => {
     it('verifyCommitment throws on wrong types', () => {
       expect(() => verifyCommitment(123 as unknown as string, 42, 'ff'.repeat(32))).toThrow('commitment must be a string');
       expect(() => verifyCommitment('02' + 'ab'.repeat(32), 3.14, 'ff'.repeat(32))).toThrow('value must be a safe integer');
+      expect(() => verifyCommitment('02' + 'ab'.repeat(32), -1, 'ff'.repeat(32))).toThrow('value must be non-negative');
       expect(() => verifyCommitment('02' + 'ab'.repeat(32), 42, 123 as unknown as string)).toThrow('blinding must be a string');
     });
 
@@ -313,10 +314,12 @@ describe('range-proof', () => {
       const proof = createRangeProof(7, 5, 10);
       const json = serializeRangeProof(proof);
       const obj = JSON.parse(json);
-      obj.__proto__ = { isAdmin: true };
       obj.extraField = 'should be dropped';
-      const deserialized = deserializeRangeProof(JSON.stringify(obj));
+      // Inject a literal "__proto__" key via JSON (the real attack vector)
+      const malicious = json.slice(0, -1) + ',"__proto__":{"isAdmin":true}}';
+      const deserialized = deserializeRangeProof(malicious);
       expect((deserialized as unknown as Record<string, unknown>)['extraField']).toBeUndefined();
+      expect(Object.prototype.hasOwnProperty.call(deserialized, '__proto__')).toBe(false);
       expect(verifyRangeProof(deserialized)).toBe(true);
     });
 

@@ -473,6 +473,7 @@ export function verifyRangeProof(proof: RangeProof): boolean {
   try {
     const { min, max, bits, lowerProof, upperProof } = proof;
     const context = proof.context ? utf8ToBytes(proof.context) : EMPTY_CONTEXT;
+    if (context.length > MAX_CONTEXT_BYTES) return false;
 
     // Validate range bounds
     if (!Number.isSafeInteger(min) || !Number.isSafeInteger(max)) return false;
