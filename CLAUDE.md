@@ -1,4 +1,4 @@
-# CLAUDE.md — secp256k1-range-proof
+# CLAUDE.md — @forgesworn/range-proof
 
 AI agent instructions for working in this repository.
 

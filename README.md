@@ -1,4 +1,4 @@
-# secp256k1-range-proof
+# @forgesworn/range-proof
 
 Pedersen commitment range proofs on secp256k1.
 
@@ -14,7 +14,7 @@ Pedersen commitment range proofs on secp256k1.
 ## Install
 
 ```bash
-npm install secp256k1-range-proof
+npm install @forgesworn/range-proof
 ```
 
 ## Usage
@@ -22,7 +22,7 @@ npm install secp256k1-range-proof
 ### Range proofs
 
 ```typescript
-import { createRangeProof, verifyRangeProof } from 'secp256k1-range-proof';
+import { createRangeProof, verifyRangeProof } from '@forgesworn/range-proof';
 
 // Prove that `value` is in [min, max] without revealing `value`
 const proof = createRangeProof(value, min, max);
@@ -34,7 +34,7 @@ const valid = verifyRangeProof(proof); // true
 ### Age range proofs
 
 ```typescript
-import { createAgeRangeProof, verifyAgeRangeProof } from 'secp256k1-range-proof';
+import { createAgeRangeProof, verifyAgeRangeProof } from '@forgesworn/range-proof';
 
 // Prove age is between 8 and 12 (e.g. child category)
 const proof = createAgeRangeProof(10, '8-12');
@@ -55,7 +55,7 @@ const proof = createRangeProof(value, min, max, 'subject-pubkey-hex');
 ### Pedersen commitments
 
 ```typescript
-import { commit, verifyCommitment } from 'secp256k1-range-proof';
+import { commit, verifyCommitment } from '@forgesworn/range-proof';
 
 const c = commit(42);
 // c.commitment — the public commitment point (compressed hex)
@@ -69,7 +69,7 @@ const valid = verifyCommitment(c.commitment, 42, c.blinding); // true
 ### Serialisation
 
 ```typescript
-import { serializeRangeProof, deserializeRangeProof } from 'secp256k1-range-proof';
+import { serializeRangeProof, deserializeRangeProof } from '@forgesworn/range-proof';
 
 const json = serializeRangeProof(proof);
 const proof2 = deserializeRangeProof(json);

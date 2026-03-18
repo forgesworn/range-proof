@@ -1,4 +1,4 @@
-# secp256k1-range-proof
+# @forgesworn/range-proof
 
 > Zero-knowledge range proofs on secp256k1 — prove a value lies within a range without revealing it, built on Pedersen commitments and @noble/curves.
 
@@ -7,7 +7,7 @@
 Install from npm:
 
 ```bash
-npm install secp256k1-range-proof
+npm install @forgesworn/range-proof
 ```
 
 ESM-only. Requires Node.js 18+. Sole runtime dependencies: `@noble/curves` and `@noble/hashes`.
@@ -15,7 +15,7 @@ ESM-only. Requires Node.js 18+. Sole runtime dependencies: `@noble/curves` and `
 Prove a value is in range:
 
 ```typescript
-import { createRangeProof, verifyRangeProof } from 'secp256k1-range-proof';
+import { createRangeProof, verifyRangeProof } from '@forgesworn/range-proof';
 
 const proof = createRangeProof(25, 18, 150);
 const valid = verifyRangeProof(proof); // true
@@ -73,7 +73,7 @@ An optional context string is included in all Fiat-Shamir challenges, binding th
 
 ## When To Use This
 
-Use `secp256k1-range-proof` when you need to prove a numeric value falls within a range without revealing the exact value:
+Use `@forgesworn/range-proof` when you need to prove a numeric value falls within a range without revealing the exact value:
 
 - **Age verification** — prove a user is 18+ without revealing their birth date
 - **Income or credit checks** — prove a score exceeds a threshold without disclosing the number
