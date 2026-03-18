@@ -4,3 +4,7 @@ dist/
 *.tgz
 .env
 .env.*
+*.pem
+*.key
+*.p12
+.npmrc

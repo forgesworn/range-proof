@@ -28,6 +28,9 @@ const DOMAIN_COMMITMENT_BINDING = 'pedersen-commitment-binding-v1';
 /** Empty context (no binding) */
 const EMPTY_CONTEXT = new Uint8Array(0);
 
+/** Maximum length (in bytes) for binding context strings */
+const MAX_CONTEXT_BYTES = 1024;
+
 /** Hex validation patterns */
 const HEX_COMPRESSED_POINT = /^(?:02|03)[0-9a-f]{64}$/i;
 const HEX_SCALAR_64 = /^[0-9a-f]{64}$/i;
@@ -62,6 +65,7 @@ export function commit(value: number, blinding?: bigint): PedersenCommitment {
 
   const v = BigInt(value);
   const r = blinding ?? randomScalar();
+  if (blinding !== undefined && mod(r) === 0n) throw new ValidationError('Blinding factor must be non-zero');
 
   // C = v*G + r*H
   const vG = safeMultiply(G, v);
@@ -79,6 +83,10 @@ export function commit(value: number, blinding?: bigint): PedersenCommitment {
  * Open and verify a Pedersen commitment.
  */
 export function verifyCommitment(commitment: string, value: number, blinding: string): boolean {
+  if (typeof commitment !== 'string') throw new ValidationError('commitment must be a string');
+  if (!Number.isSafeInteger(value)) throw new ValidationError('value must be a safe integer');
+  if (value < 0) throw new ValidationError('value must be non-negative');
+  if (typeof blinding !== 'string') throw new ValidationError('blinding must be a string');
   try {
     const v = BigInt(value);
     const r = hexToScalar(blinding);
@@ -379,7 +387,11 @@ export function createRangeProof(value: number, min: number, max: number, bindin
   if (max < min) throw new ValidationError('Maximum must be >= minimum');
   if (value < min || value > max) throw new ValidationError('Value is not within the specified range');
 
+  if (bindingContext !== undefined && bindingContext.length > MAX_CONTEXT_BYTES) {
+    throw new ValidationError('Binding context exceeds maximum length (1024 bytes)');
+  }
   const context = bindingContext ? utf8ToBytes(bindingContext) : EMPTY_CONTEXT;
+  if (context.length > MAX_CONTEXT_BYTES) throw new ValidationError('Binding context exceeds maximum length (1024 bytes)');
 
   const range = max - min;
   const bits = bitsNeeded(range);
@@ -463,9 +475,12 @@ export function createRangeProof(value: number, min: number, max: number, bindin
 export function verifyRangeProof(proof: RangeProof): boolean {
   try {
     const { min, max, bits, lowerProof, upperProof } = proof;
+    if (proof.context && proof.context.length > MAX_CONTEXT_BYTES) return false;
     const context = proof.context ? utf8ToBytes(proof.context) : EMPTY_CONTEXT;
+    if (context.length > MAX_CONTEXT_BYTES) return false;
 
     // Validate range bounds
+    if (!Number.isSafeInteger(min) || !Number.isSafeInteger(max)) return false;
     if (min < 0 || max < 0 || max < min) return false;
 
     // Recompute expected bits from range — do not trust proof.bits blindly
@@ -547,14 +562,14 @@ export function createAgeRangeProof(age: number, ageRange: string, subjectPubkey
   // Handle "18+" format (no upper bound — use 150 as practical max)
   if (ageRange.endsWith('+')) {
     const minStr = ageRange.slice(0, -1);
-    if (!DIGITS_ONLY.test(minStr)) throw new ValidationError(`Invalid age range format: ${ageRange}`);
+    if (!DIGITS_ONLY.test(minStr)) throw new ValidationError('Invalid age range format (expected "min-max" or "min+")');
     return createRangeProof(age, parseInt(minStr, 10), 150, subjectPubkey);
   }
 
   const parts = ageRange.split('-');
-  if (parts.length !== 2) throw new ValidationError(`Invalid age range format: ${ageRange} (expected "min-max")`);
+  if (parts.length !== 2) throw new ValidationError('Invalid age range format (expected "min-max" or "min+")');
   if (!DIGITS_ONLY.test(parts[0]) || !DIGITS_ONLY.test(parts[1])) {
-    throw new ValidationError(`Invalid age range format: ${ageRange}`);
+    throw new ValidationError('Invalid age range format (expected "min-max" or "min+")');
   }
   const min = parseInt(parts[0], 10);
   const max = parseInt(parts[1], 10);
@@ -603,11 +618,16 @@ export function deserializeRangeProof(json: string): RangeProof {
   if (!Number.isSafeInteger(p.bits) || (p.bits as number) < 1 || (p.bits as number) > 32) {
     throw new ValidationError('Invalid range proof: bits must be between 1 and 32');
   }
+  // Verify bits is consistent with min/max
+  const expectedBits = bitsNeeded((p.max as number) - (p.min as number));
+  if ((p.bits as number) !== expectedBits) {
+    throw new ValidationError('Invalid range proof: bits does not match range');
+  }
   if (!Array.isArray(p.lowerProof) || !Array.isArray(p.upperProof)) {
     throw new ValidationError('Invalid range proof: missing lowerProof/upperProof');
   }
-  if ((p.lowerProof as unknown[]).length > 32 || (p.upperProof as unknown[]).length > 32) {
-    throw new ValidationError('Invalid range proof: proof arrays exceed maximum length (32)');
+  if ((p.lowerProof as unknown[]).length !== expectedBits || (p.upperProof as unknown[]).length !== expectedBits) {
+    throw new ValidationError('Invalid range proof: proof array length does not match bits');
   }
   if (typeof p.lowerCommitment !== 'string' || typeof p.upperCommitment !== 'string') {
     throw new ValidationError('Invalid range proof: missing lowerCommitment/upperCommitment');
@@ -646,5 +666,34 @@ export function deserializeRangeProof(json: string): RangeProof {
   if (p.context !== undefined && typeof p.context !== 'string') {
     throw new ValidationError('Invalid range proof: context must be a string if present');
   }
-  return p as unknown as RangeProof;
+  if (typeof p.context === 'string') {
+    if (p.context.length > MAX_CONTEXT_BYTES) throw new ValidationError('Invalid range proof: context exceeds maximum length (1024 bytes)');
+    if (utf8ToBytes(p.context).length > MAX_CONTEXT_BYTES) throw new ValidationError('Invalid range proof: context exceeds maximum length (1024 bytes)');
+  }
+  // Construct from whitelisted fields to prevent prototype pollution via __proto__/constructor keys
+  const bitProofMapper = (bp: unknown): BitProof => {
+    const r = bp as Record<string, unknown>;
+    return {
+      commitment: r.commitment as string,
+      e0: r.e0 as string,
+      s0: r.s0 as string,
+      e1: r.e1 as string,
+      s1: r.s1 as string,
+    };
+  };
+  return {
+    commitment: p.commitment as string,
+    min: p.min as number,
+    max: p.max as number,
+    bits: p.bits as number,
+    lowerProof: (p.lowerProof as unknown[]).map(bitProofMapper),
+    upperProof: (p.upperProof as unknown[]).map(bitProofMapper),
+    lowerCommitment: p.lowerCommitment as string,
+    upperCommitment: p.upperCommitment as string,
+    sumBindingE: p.sumBindingE as string,
+    sumBindingS: p.sumBindingS as string,
+    commitBindingE: p.commitBindingE as string,
+    commitBindingS: p.commitBindingS as string,
+    ...(p.context !== undefined ? { context: p.context as string } : {}),
+  };
 }
