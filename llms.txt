@@ -18,7 +18,7 @@ Prove a value is in range:
 import { createRangeProof, verifyRangeProof } from '@forgesworn/range-proof';
 
 const proof = createRangeProof(25, 18, 150);
-const valid = verifyRangeProof(proof); // true
+const valid = verifyRangeProof(proof, 18, 150); // true
 ```
 
 Bind a proof to a subject identity (prevents transplant attacks):
@@ -46,9 +46,9 @@ An optional context string is included in all Fiat-Shamir challenges, binding th
 ### Core Functions
 
 - `createRangeProof(value, min, max, bindingContext?)` — prove `value` is in `[min, max]`
-- `verifyRangeProof(proof)` — verify a range proof (returns boolean)
+- `verifyRangeProof(proof, expectedMin, expectedMax, expectedBindingContext?)` — verify a range proof against expected public inputs
 - `createAgeRangeProof(age, ageRange, subjectPubkey?)` — convenience wrapper accepting `'18+'` or `'8-12'` format
-- `verifyAgeRangeProof(proof)` — verify an age range proof
+- `verifyAgeRangeProof(proof, expectedAgeRange, expectedSubjectPubkey?)` — verify an age range proof against an expected policy
 
 ### Pedersen Commitments
 

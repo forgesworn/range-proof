@@ -43,6 +43,51 @@ function isValidScalarHex(hex: string): boolean {
   return HEX_SCALAR_64.test(hex);
 }
 
+function normalizeBindingContext(bindingContext?: string): string | undefined {
+  return bindingContext === '' ? undefined : bindingContext;
+}
+
+function bindingContextToBytes(bindingContext?: string): Uint8Array {
+  const normalized = normalizeBindingContext(bindingContext);
+  if (normalized === undefined) return EMPTY_CONTEXT;
+  if (normalized.length > MAX_CONTEXT_BYTES) {
+    throw new ValidationError('Binding context exceeds maximum length (1024 bytes)');
+  }
+  const context = utf8ToBytes(normalized);
+  if (context.length > MAX_CONTEXT_BYTES) {
+    throw new ValidationError('Binding context exceeds maximum length (1024 bytes)');
+  }
+  return context;
+}
+
+function sameBindingContext(left?: string, right?: string): boolean {
+  return normalizeBindingContext(left) === normalizeBindingContext(right);
+}
+
+function parseAgeRange(ageRange: string): { min: number; max: number } {
+  const DIGITS_ONLY = /^\d+$/;
+
+  if (ageRange.endsWith('+')) {
+    const minStr = ageRange.slice(0, -1);
+    if (!DIGITS_ONLY.test(minStr)) {
+      throw new ValidationError('Invalid age range format (expected "min-max" or "min+")');
+    }
+    return { min: parseInt(minStr, 10), max: 150 };
+  }
+
+  const parts = ageRange.split('-');
+  if (parts.length !== 2) {
+    throw new ValidationError('Invalid age range format (expected "min-max" or "min+")');
+  }
+  if (!DIGITS_ONLY.test(parts[0]) || !DIGITS_ONLY.test(parts[1])) {
+    throw new ValidationError('Invalid age range format (expected "min-max" or "min+")');
+  }
+  return {
+    min: parseInt(parts[0], 10),
+    max: parseInt(parts[1], 10),
+  };
+}
+
 // --- Pedersen Commitment ---
 
 export interface PedersenCommitment {
@@ -387,11 +432,8 @@ export function createRangeProof(value: number, min: number, max: number, bindin
   if (max < min) throw new ValidationError('Maximum must be >= minimum');
   if (value < min || value > max) throw new ValidationError('Value is not within the specified range');
 
-  if (bindingContext !== undefined && bindingContext.length > MAX_CONTEXT_BYTES) {
-    throw new ValidationError('Binding context exceeds maximum length (1024 bytes)');
-  }
-  const context = bindingContext ? utf8ToBytes(bindingContext) : EMPTY_CONTEXT;
-  if (context.length > MAX_CONTEXT_BYTES) throw new ValidationError('Binding context exceeds maximum length (1024 bytes)');
+  const normalizedBindingContext = normalizeBindingContext(bindingContext);
+  const context = bindingContextToBytes(normalizedBindingContext);
 
   const range = max - min;
   const bits = bitsNeeded(range);
@@ -462,7 +504,7 @@ export function createRangeProof(value: number, min: number, max: number, bindin
     sumBindingS: sumBinding.s,
     commitBindingE: commitBinding.e,
     commitBindingS: commitBinding.s,
-    context: bindingContext,
+    ...(normalizedBindingContext !== undefined ? { context: normalizedBindingContext } : {}),
   };
 }
 
@@ -470,18 +512,30 @@ export function createRangeProof(value: number, min: number, max: number, bindin
  * Verify a range proof.
  *
  * @param proof - The range proof to verify
+ * @param expectedMin - The minimum bound the verifier expects
+ * @param expectedMax - The maximum bound the verifier expects
+ * @param expectedBindingContext - Optional binding context the verifier expects
  * @returns true if the proof is valid
  */
-export function verifyRangeProof(proof: RangeProof): boolean {
+export function verifyRangeProof(
+  proof: RangeProof,
+  expectedMin: number,
+  expectedMax: number,
+  expectedBindingContext?: string
+): boolean {
   try {
     const { min, max, bits, lowerProof, upperProof } = proof;
-    if (proof.context && proof.context.length > MAX_CONTEXT_BYTES) return false;
-    const context = proof.context ? utf8ToBytes(proof.context) : EMPTY_CONTEXT;
-    if (context.length > MAX_CONTEXT_BYTES) return false;
+    if (!Number.isSafeInteger(expectedMin) || !Number.isSafeInteger(expectedMax)) return false;
+    if (expectedMin < 0 || expectedMax < 0 || expectedMax < expectedMin) return false;
+
+    const context = bindingContextToBytes(proof.context);
+    bindingContextToBytes(expectedBindingContext);
 
     // Validate range bounds
     if (!Number.isSafeInteger(min) || !Number.isSafeInteger(max)) return false;
     if (min < 0 || max < 0 || max < min) return false;
+    if (min !== expectedMin || max !== expectedMax) return false;
+    if (!sameBindingContext(proof.context, expectedBindingContext)) return false;
 
     // Recompute expected bits from range — do not trust proof.bits blindly
     const expectedBits = bitsNeeded(max - min);
@@ -557,22 +611,7 @@ export function verifyRangeProof(proof: RangeProof): boolean {
  * @returns The range proof
  */
 export function createAgeRangeProof(age: number, ageRange: string, subjectPubkey?: string): RangeProof {
-  const DIGITS_ONLY = /^\d+$/;
-
-  // Handle "18+" format (no upper bound — use 150 as practical max)
-  if (ageRange.endsWith('+')) {
-    const minStr = ageRange.slice(0, -1);
-    if (!DIGITS_ONLY.test(minStr)) throw new ValidationError('Invalid age range format (expected "min-max" or "min+")');
-    return createRangeProof(age, parseInt(minStr, 10), 150, subjectPubkey);
-  }
-
-  const parts = ageRange.split('-');
-  if (parts.length !== 2) throw new ValidationError('Invalid age range format (expected "min-max" or "min+")');
-  if (!DIGITS_ONLY.test(parts[0]) || !DIGITS_ONLY.test(parts[1])) {
-    throw new ValidationError('Invalid age range format (expected "min-max" or "min+")');
-  }
-  const min = parseInt(parts[0], 10);
-  const max = parseInt(parts[1], 10);
+  const { min, max } = parseAgeRange(ageRange);
 
   return createRangeProof(age, min, max, subjectPubkey);
 }
@@ -580,8 +619,13 @@ export function createAgeRangeProof(age: number, ageRange: string, subjectPubkey
 /**
  * Verify an age range proof.
  */
-export function verifyAgeRangeProof(proof: RangeProof): boolean {
-  return verifyRangeProof(proof);
+export function verifyAgeRangeProof(proof: RangeProof, expectedAgeRange: string, expectedSubjectPubkey?: string): boolean {
+  try {
+    const { min, max } = parseAgeRange(expectedAgeRange);
+    return verifyRangeProof(proof, min, max, expectedSubjectPubkey);
+  } catch {
+    return false;
+  }
 }
 
 /**

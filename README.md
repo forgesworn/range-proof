@@ -27,8 +27,8 @@ import { createRangeProof, verifyRangeProof } from '@forgesworn/range-proof';
 // Prove that `value` is in [min, max] without revealing `value`
 const proof = createRangeProof(value, min, max);
 
-// Anyone can verify the proof
-const valid = verifyRangeProof(proof); // true
+// Verifiers must supply the public range they expect
+const valid = verifyRangeProof(proof, min, max); // true
 ```
 
 ### Age range proofs
@@ -38,10 +38,11 @@ import { createAgeRangeProof, verifyAgeRangeProof } from '@forgesworn/range-proo
 
 // Prove age is between 8 and 12 (e.g. child category)
 const proof = createAgeRangeProof(10, '8-12');
-const valid = verifyAgeRangeProof(proof); // true
+const valid = verifyAgeRangeProof(proof, '8-12'); // true
 
 // Prove age is 18 or over
 const adultProof = createAgeRangeProof(25, '18+');
+const adultValid = verifyAgeRangeProof(adultProof, '18+'); // true
 ```
 
 ### Binding context
@@ -50,6 +51,7 @@ Pass an optional context string to bind the proof to a specific credential or id
 
 ```typescript
 const proof = createRangeProof(value, min, max, 'subject-pubkey-hex');
+const valid = verifyRangeProof(proof, min, max, 'subject-pubkey-hex');
 ```
 
 ### Pedersen commitments

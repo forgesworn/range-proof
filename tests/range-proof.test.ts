@@ -39,22 +39,22 @@ describe('range-proof', () => {
   describe('range proofs', () => {
     it('proves value in small range [0, 3]', () => {
       const proof = createRangeProof(2, 0, 3);
-      expect(verifyRangeProof(proof)).toBe(true);
+      expect(verifyRangeProof(proof, 0, 3)).toBe(true);
     });
 
     it('proves value at range minimum', () => {
       const proof = createRangeProof(5, 5, 10);
-      expect(verifyRangeProof(proof)).toBe(true);
+      expect(verifyRangeProof(proof, 5, 10)).toBe(true);
     });
 
     it('proves value at range maximum', () => {
       const proof = createRangeProof(10, 5, 10);
-      expect(verifyRangeProof(proof)).toBe(true);
+      expect(verifyRangeProof(proof, 5, 10)).toBe(true);
     });
 
     it('proves value in middle of range', () => {
       const proof = createRangeProof(7, 5, 10);
-      expect(verifyRangeProof(proof)).toBe(true);
+      expect(verifyRangeProof(proof, 5, 10)).toBe(true);
     });
 
     it('rejects value below range', () => {
@@ -67,31 +67,36 @@ describe('range-proof', () => {
 
     it('proves single-value range', () => {
       const proof = createRangeProof(7, 7, 7);
-      expect(verifyRangeProof(proof)).toBe(true);
+      expect(verifyRangeProof(proof, 7, 7)).toBe(true);
     });
   });
 
   describe('age range proofs', () => {
     it('proves age 10 in range 8-12', () => {
       const proof = createAgeRangeProof(10, '8-12');
-      expect(verifyAgeRangeProof(proof)).toBe(true);
+      expect(verifyAgeRangeProof(proof, '8-12')).toBe(true);
       expect(proof.min).toBe(8);
       expect(proof.max).toBe(12);
     });
 
     it('proves age 8 in range 8-12 (boundary)', () => {
       const proof = createAgeRangeProof(8, '8-12');
-      expect(verifyAgeRangeProof(proof)).toBe(true);
+      expect(verifyAgeRangeProof(proof, '8-12')).toBe(true);
     });
 
     it('proves age 12 in range 8-12 (boundary)', () => {
       const proof = createAgeRangeProof(12, '8-12');
-      expect(verifyAgeRangeProof(proof)).toBe(true);
+      expect(verifyAgeRangeProof(proof, '8-12')).toBe(true);
     });
 
     it('proves age 15 in range 13-17', () => {
       const proof = createAgeRangeProof(15, '13-17');
-      expect(verifyAgeRangeProof(proof)).toBe(true);
+      expect(verifyAgeRangeProof(proof, '13-17')).toBe(true);
+    });
+
+    it('rejects a valid age proof for the wrong age policy', () => {
+      const proof = createAgeRangeProof(10, '8-12');
+      expect(verifyAgeRangeProof(proof, '18+')).toBe(false);
     });
 
     it('rejects age 7 for range 8-12', () => {
@@ -108,13 +113,18 @@ describe('range-proof', () => {
       const proof = createRangeProof(7, 5, 10, 'pubkey_A');
       // Manually swap the context to simulate transplanting the proof to a different credential
       const transplanted = { ...proof, context: 'pubkey_B' };
-      expect(verifyRangeProof(transplanted)).toBe(false);
+      expect(verifyRangeProof(transplanted, 5, 10, 'pubkey_A')).toBe(false);
     });
 
     it('rejects proof created with context when verified without context', () => {
       const proof = createRangeProof(7, 5, 10, 'pubkey_A');
       const stripped = { ...proof, context: undefined };
-      expect(verifyRangeProof(stripped)).toBe(false);
+      expect(verifyRangeProof(stripped, 5, 10, 'pubkey_A')).toBe(false);
+    });
+
+    it('rejects proof when verifier expects a different context', () => {
+      const proof = createRangeProof(7, 5, 10, 'pubkey_A');
+      expect(verifyRangeProof(proof, 5, 10, 'pubkey_B')).toBe(false);
     });
   });
 
@@ -124,7 +134,7 @@ describe('range-proof', () => {
       const json = serializeRangeProof(proof);
       const deserialized = deserializeRangeProof(json);
 
-      expect(verifyAgeRangeProof(deserialized)).toBe(true);
+      expect(verifyAgeRangeProof(deserialized, '8-12')).toBe(true);
       expect(deserialized.min).toBe(8);
       expect(deserialized.max).toBe(12);
     });
@@ -142,19 +152,24 @@ describe('range-proof', () => {
     it('verifyRangeProof rejects when min > max', () => {
       const proof = createRangeProof(5, 0, 10);
       const tampered = { ...proof, min: 10, max: 0 };
-      expect(verifyRangeProof(tampered)).toBe(false);
+      expect(verifyRangeProof(tampered, 0, 10)).toBe(false);
     });
 
     it('verifyRangeProof rejects when proof.bits is tampered', () => {
       const proof = createRangeProof(5, 0, 10);
       const tampered = { ...proof, bits: 0, lowerProof: [], upperProof: [] };
-      expect(verifyRangeProof(tampered)).toBe(false);
+      expect(verifyRangeProof(tampered, 0, 10)).toBe(false);
     });
 
     it('verifyRangeProof rejects when proof.bits mismatches range', () => {
       const proof = createRangeProof(5, 0, 10);
       const tampered = { ...proof, bits: proof.bits + 1 };
-      expect(verifyRangeProof(tampered)).toBe(false);
+      expect(verifyRangeProof(tampered, 0, 10)).toBe(false);
+    });
+
+    it('verifyRangeProof rejects a valid proof for the wrong expected range', () => {
+      const proof = createRangeProof(5, 0, 10);
+      expect(verifyRangeProof(proof, 0, 11)).toBe(false);
     });
 
     it('rejects commitment substitution (commitment not bound to sub-proofs)', () => {
@@ -164,7 +179,7 @@ describe('range-proof', () => {
 
       // Swap the commitment — sub-proofs stay from proofA but commitment from proofB
       const tampered = { ...proofA, commitment: proofB.commitment };
-      expect(verifyRangeProof(tampered)).toBe(false);
+      expect(verifyRangeProof(tampered, 0, 15)).toBe(false);
     });
 
     it('rejects commitment substitution even when range and min match', () => {
@@ -173,7 +188,7 @@ describe('range-proof', () => {
       const proof2 = createRangeProof(8, 5, 10);
 
       const tampered = { ...proof1, commitment: proof2.commitment };
-      expect(verifyRangeProof(tampered)).toBe(false);
+      expect(verifyRangeProof(tampered, 5, 10)).toBe(false);
     });
 
     it('commit() rejects negative values', () => {
@@ -286,28 +301,28 @@ describe('range-proof', () => {
 
     it('verifyRangeProof rejects non-safe-integer min/max', () => {
       const proof = createRangeProof(5, 0, 10);
-      expect(verifyRangeProof({ ...proof, min: 1.5 })).toBe(false);
-      expect(verifyRangeProof({ ...proof, max: NaN })).toBe(false);
-      expect(verifyRangeProof({ ...proof, min: -1 })).toBe(false);
+      expect(verifyRangeProof({ ...proof, min: 1.5 }, 0, 10)).toBe(false);
+      expect(verifyRangeProof({ ...proof, max: NaN }, 0, 10)).toBe(false);
+      expect(verifyRangeProof({ ...proof, min: -1 }, 0, 10)).toBe(false);
     });
 
     it('verifyRangeProof rejects tampered sumBinding scalars', () => {
       const proof = createRangeProof(7, 5, 10);
-      expect(verifyRangeProof({ ...proof, sumBindingE: '00'.repeat(32) })).toBe(false);
-      expect(verifyRangeProof({ ...proof, sumBindingS: '00'.repeat(32) })).toBe(false);
+      expect(verifyRangeProof({ ...proof, sumBindingE: '00'.repeat(32) }, 5, 10)).toBe(false);
+      expect(verifyRangeProof({ ...proof, sumBindingS: '00'.repeat(32) }, 5, 10)).toBe(false);
     });
 
     it('verifyRangeProof rejects tampered commitBinding scalars', () => {
       const proof = createRangeProof(7, 5, 10);
-      expect(verifyRangeProof({ ...proof, commitBindingE: '00'.repeat(32) })).toBe(false);
-      expect(verifyRangeProof({ ...proof, commitBindingS: '00'.repeat(32) })).toBe(false);
+      expect(verifyRangeProof({ ...proof, commitBindingE: '00'.repeat(32) }, 5, 10)).toBe(false);
+      expect(verifyRangeProof({ ...proof, commitBindingS: '00'.repeat(32) }, 5, 10)).toBe(false);
     });
 
     it('verifyRangeProof rejects tampered bit proof scalar', () => {
       const proof = createRangeProof(7, 5, 10);
       const tampered = { ...proof, lowerProof: [...proof.lowerProof] };
       tampered.lowerProof[0] = { ...tampered.lowerProof[0], e0: '00'.repeat(32) };
-      expect(verifyRangeProof(tampered)).toBe(false);
+      expect(verifyRangeProof(tampered, 5, 10)).toBe(false);
     });
 
     it('deserialisation strips __proto__ and extra keys (prototype pollution prevention)', () => {
@@ -320,7 +335,7 @@ describe('range-proof', () => {
       const deserialized = deserializeRangeProof(malicious);
       expect((deserialized as unknown as Record<string, unknown>)['extraField']).toBeUndefined();
       expect(Object.prototype.hasOwnProperty.call(deserialized, '__proto__')).toBe(false);
-      expect(verifyRangeProof(deserialized)).toBe(true);
+      expect(verifyRangeProof(deserialized, 5, 10)).toBe(true);
     });
 
     it('deserialisation rejects bits inconsistent with range', () => {
@@ -349,19 +364,19 @@ describe('range-proof', () => {
       const json = serializeRangeProof(proof);
       const deserialized = deserializeRangeProof(json);
       expect(deserialized.context).toBe('pubkey_A');
-      expect(verifyRangeProof(deserialized)).toBe(true);
+      expect(verifyRangeProof(deserialized, 5, 10, 'pubkey_A')).toBe(true);
     });
 
     it('proves value = 0 in range [0, 7]', () => {
       const proof = createRangeProof(0, 0, 7);
-      expect(verifyRangeProof(proof)).toBe(true);
+      expect(verifyRangeProof(proof, 0, 7)).toBe(true);
     });
 
     it('verifyRangeProof rejects proof created without context verified with injected context', () => {
       const proof = createRangeProof(7, 5, 10);
       expect(proof.context).toBeUndefined();
       const injected = { ...proof, context: 'injected' };
-      expect(verifyRangeProof(injected)).toBe(false);
+      expect(verifyRangeProof(injected, 5, 10)).toBe(false);
     });
   });
 });
