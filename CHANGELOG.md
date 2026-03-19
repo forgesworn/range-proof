@@ -1,3 +1,10 @@
+## [1.0.2](https://github.com/forgesworn/range-proof/compare/v1.0.1...v1.0.2) (2026-03-19)
+
+
+### Bug Fixes
+
+* require expected policy in proof verification ([9ca8084](https://github.com/forgesworn/range-proof/commit/9ca8084586cf4c5d5de48ed447dc5fd3af8bc5da))
+
 ## [1.0.1](https://github.com/forgesworn/range-proof/compare/v1.0.0...v1.0.1) (2026-03-18)
 
 
