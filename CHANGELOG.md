@@ -1,3 +1,10 @@
+## [1.0.3](https://github.com/forgesworn/range-proof/compare/v1.0.2...v1.0.3) (2026-03-20)
+
+
+### Bug Fixes
+
+* correct copyright to ForgeSworn ([b1b316f](https://github.com/forgesworn/range-proof/commit/b1b316fdbd5425483a9b1e6deac9c65d28672076))
+
 ## [1.0.2](https://github.com/forgesworn/range-proof/compare/v1.0.1...v1.0.2) (2026-03-19)
 
 
