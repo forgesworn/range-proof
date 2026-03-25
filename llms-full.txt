@@ -1,0 +1,356 @@
+# @forgesworn/range-proof — Full API Reference
+
+> Pedersen commitment range proofs on secp256k1 — prove a secret value lies within `[min, max]` without revealing it. Built on CDS OR-composition (Cramer-Damgård-Schoenmakers) bit proofs with Fiat-Shamir domain separation. Pure TypeScript, ESM-only, browser-compatible.
+
+GitHub: https://github.com/forgesworn/range-proof
+npm: https://www.npmjs.com/package/@forgesworn/range-proof
+Version: 1.0.3
+
+## Install
+
+```bash
+npm install @forgesworn/range-proof
+```
+
+Runtime dependencies: `@noble/curves`, `@noble/hashes`. ESM-only. Requires Node.js 18+. Browser-compatible.
+
+---
+
+## Quick Start
+
+```typescript
+import { createRangeProof, verifyRangeProof } from '@forgesworn/range-proof';
+
+// Prove age is in [18, 150] without revealing the exact age
+const proof = createRangeProof(25, 18, 150);
+const valid = verifyRangeProof(proof, 18, 150); // true
+
+// Bind proof to a specific subject (prevents transplant attacks)
+const bound = createRangeProof(25, 18, 150, 'subject-pubkey-hex');
+const validBound = verifyRangeProof(bound, 18, 150, 'subject-pubkey-hex'); // true
+
+// Age convenience helpers
+import { createAgeRangeProof, verifyAgeRangeProof } from '@forgesworn/range-proof';
+
+const ageProof = createAgeRangeProof(25, '18+');
+const ageValid = verifyAgeRangeProof(ageProof, '18+'); // true
+
+const bandProof = createAgeRangeProof(10, '8-12', 'subject-pubkey');
+const bandValid = verifyAgeRangeProof(bandProof, '8-12', 'subject-pubkey'); // true
+```
+
+---
+
+## Types
+
+### `PedersenCommitment`
+
+```typescript
+interface PedersenCommitment {
+  commitment: string  // The commitment point C = v*G + r*H (compressed hex, 66 chars)
+  blinding: string    // The blinding factor r (64-char hex) — kept secret by the committer
+  value: number       // The committed value — kept secret by the committer
+}
+```
+
+Never transmit `blinding` or `value` to a verifier. Share only `commitment`.
+
+---
+
+### `RangeProof`
+
+```typescript
+interface RangeProof {
+  commitment: string        // Overall commitment C = v*G + r*H (compressed hex)
+  min: number               // Minimum of the range
+  max: number               // Maximum of the range
+  bits: number              // Number of bits used (ceil(log2(max - min + 1)))
+  lowerProof: BitProof[]    // CDS bit proofs for (value - min)
+  upperProof: BitProof[]    // CDS bit proofs for (max - value)
+  lowerCommitment: string   // Commitment to (value - min)
+  upperCommitment: string   // Commitment to (max - value)
+  sumBindingE: string       // Sum-binding Schnorr proof challenge (hex scalar)
+  sumBindingS: string       // Sum-binding Schnorr proof response (hex scalar)
+  commitBindingE: string    // Commitment-binding Schnorr proof challenge (hex scalar)
+  commitBindingS: string    // Commitment-binding Schnorr proof response (hex scalar)
+  context?: string          // Optional binding context string
+}
+```
+
+`RangeProof` is JSON-serialisable. All hex strings are lowercase. Pass the whole object to `serializeRangeProof()` for transport.
+
+---
+
+## Core Functions
+
+### `createRangeProof(value, min, max, bindingContext?): RangeProof`
+
+```typescript
+function createRangeProof(
+  value: number,
+  min: number,
+  max: number,
+  bindingContext?: string
+): RangeProof
+```
+
+Proves that `value` is in `[min, max]` without revealing `value`.
+
+- `value`, `min`, `max` must be safe integers
+- `min` must be non-negative
+- `max` must be `>= min`
+- `value` must be in `[min, max]`
+- Maximum range: `2^32` (throws `CryptoError` if exceeded)
+- `bindingContext` — optional string included in all Fiat-Shamir challenges; a proof created with one context will not verify under a different context
+
+**Throws** `ValidationError` for invalid inputs, `CryptoError` if the range exceeds `2^32`.
+
+```typescript
+const proof = createRangeProof(42, 0, 100);
+// proof.commitment — share this with the verifier
+// proof itself — share this with the verifier
+// value (42) — never share
+```
+
+---
+
+### `verifyRangeProof(proof, expectedMin, expectedMax, expectedBindingContext?): boolean`
+
+```typescript
+function verifyRangeProof(
+  proof: RangeProof,
+  expectedMin: number,
+  expectedMax: number,
+  expectedBindingContext?: string
+): boolean
+```
+
+Verifies a range proof. Returns `true` only if all of the following hold:
+
+1. All CDS OR-composition bit proofs for `(value - min)` verify
+2. All CDS OR-composition bit proofs for `(max - value)` verify
+3. Bit commitments sum to the aggregate lower/upper commitments
+4. Sum-binding Schnorr proof verifies (proves `lowerVal + upperVal = max - min`)
+5. Commitment-binding Schnorr proof verifies (proves `commitment` is bound to `lowerCommitment`)
+6. `proof.min === expectedMin`, `proof.max === expectedMax`
+7. Binding context matches `expectedBindingContext`
+
+Returns `false` (not throws) on tampered proofs, invalid hex, or mismatched parameters.
+
+```typescript
+const ok = verifyRangeProof(proof, 0, 100);     // true
+const fail = verifyRangeProof(proof, 0, 50);    // false — range mismatch
+```
+
+---
+
+### `createAgeRangeProof(age, ageRange, subjectPubkey?): RangeProof`
+
+```typescript
+function createAgeRangeProof(
+  age: number,
+  ageRange: string,
+  subjectPubkey?: string
+): RangeProof
+```
+
+Convenience wrapper for age proofs. `ageRange` formats:
+
+- `'18+'` — proves `age >= 18` (uses `[18, 150]` as the range)
+- `'8-12'` — proves `age in [8, 12]`
+
+`subjectPubkey` is used as the binding context.
+
+**Throws** `ValidationError` for invalid age range format (must match `"min-max"` or `"min+"`).
+
+```typescript
+const proof = createAgeRangeProof(25, '18+', 'npub1...');
+```
+
+---
+
+### `verifyAgeRangeProof(proof, expectedAgeRange, expectedSubjectPubkey?): boolean`
+
+```typescript
+function verifyAgeRangeProof(
+  proof: RangeProof,
+  expectedAgeRange: string,
+  expectedSubjectPubkey?: string
+): boolean
+```
+
+Verify an age range proof. Returns `false` (not throws) on bad input or invalid proof.
+
+```typescript
+const ok = verifyAgeRangeProof(proof, '18+', 'npub1...');
+```
+
+---
+
+## Pedersen Commitment Functions
+
+### `commit(value, blinding?): PedersenCommitment`
+
+```typescript
+function commit(value: number, blinding?: bigint): PedersenCommitment
+```
+
+Create a Pedersen commitment `C = v*G + r*H`.
+
+- `value` must be a non-negative safe integer
+- `blinding` — optional blinding factor as `bigint`; random if not provided
+- Returns `{ commitment, blinding, value }` — keep `blinding` and `value` secret
+
+```typescript
+const c = commit(42);
+// c.commitment — share with verifier
+// c.blinding, c.value — keep secret
+```
+
+**Throws** `ValidationError` for negative or non-integer values, or a zero blinding factor.
+
+---
+
+### `verifyCommitment(commitment, value, blinding): boolean`
+
+```typescript
+function verifyCommitment(
+  commitment: string,
+  value: number,
+  blinding: string
+): boolean
+```
+
+Open and verify a Pedersen commitment. Returns `true` if `commitment = value*G + blinding*H`.
+
+```typescript
+const ok = verifyCommitment(c.commitment, 42, c.blinding); // true
+```
+
+Returns `false` (not throws) on invalid inputs.
+
+---
+
+## Serialisation
+
+### `serializeRangeProof(proof: RangeProof): string`
+
+```typescript
+function serializeRangeProof(proof: RangeProof): string
+```
+
+Serialise a range proof to a JSON string. The output is suitable for storage or transport.
+
+---
+
+### `deserializeRangeProof(json: string): RangeProof`
+
+```typescript
+function deserializeRangeProof(json: string): RangeProof
+```
+
+Deserialise a range proof from a JSON string. Performs full input validation:
+
+- Validates hex format for all commitment and scalar fields
+- Validates compressed point format (`02`/`03` prefix + 64 hex chars)
+- Validates `bits` is consistent with `max - min`
+- Validates proof array lengths match `bits`
+- Validates `context` length if present
+- Reconstructs from an explicit whitelist of fields (prevents prototype pollution)
+
+**Throws** `ValidationError` for any malformed input.
+
+```typescript
+const json = serializeRangeProof(proof);
+const recovered = deserializeRangeProof(json);
+```
+
+---
+
+## Error Classes
+
+### `RangeProofError`
+
+Base class for all library errors.
+
+```typescript
+class RangeProofError extends Error {
+  name: 'RangeProofError'
+}
+```
+
+### `ValidationError extends RangeProofError`
+
+Thrown for malformed inputs, out-of-range values, or bad JSON.
+
+```typescript
+class ValidationError extends RangeProofError {
+  name: 'ValidationError'
+}
+```
+
+**Triggers:** negative values, non-integer inputs, `max < min`, `value` outside `[min, max]`, invalid hex, bad age range format, context exceeding 1024 bytes.
+
+### `CryptoError extends RangeProofError`
+
+Thrown for cryptographic failures.
+
+```typescript
+class CryptoError extends RangeProofError {
+  name: 'CryptoError'
+}
+```
+
+**Triggers:** range exceeds `2^32`.
+
+---
+
+## Cryptographic Design
+
+### Generator H
+
+The second generator `H` is a nothing-up-my-sleeve point: derived by hashing the string `'secp256k1-pedersen-H-v1'` to a curve point. No one knows `log_G(H)`, which is essential for the binding property of Pedersen commitments.
+
+### CDS OR-Composition
+
+Range proofs decompose the value into bits. Each bit commitment is proved to be 0 or 1 using Cramer-Damgård-Schoenmakers OR-composition. The prover holds the real branch; the other branch is simulated via the Schnorr convention `s = k - e*r`.
+
+### Sum-Binding Proof
+
+Proves `lowerC + upperC - range*G = r_total * H`, establishing that `(value - min) + (max - value) = max - min` without revealing either sub-value.
+
+### Commitment-Binding Proof
+
+Proves `C - lowerC - min*G = (r - r_lower)*H`, algebraically binding the overall commitment `C` to the verified lower-range commitment.
+
+### Fiat-Shamir Domain Separators
+
+Three non-interactive challenge domains prevent cross-proof attacks:
+
+- `pedersen-bit-proof-v1` — bit proof challenges
+- `pedersen-sum-binding-v1` — sum-binding challenges
+- `pedersen-commitment-binding-v1` — commitment-binding challenges
+
+Do not modify these strings — changing them breaks all existing proofs.
+
+### Binding Context
+
+An optional UTF-8 string (max 1024 bytes) is included in all Fiat-Shamir hash inputs. Use the subject's public key as context to prevent a valid proof being transplanted to a different credential.
+
+---
+
+## Use Cases
+
+- **Age verification** — prove a user is 18+ without revealing their birth year
+- **Income or credit checks** — prove a score exceeds a threshold without disclosing the number
+- **Salary negotiation** — prove a salary falls within a band without naming the figure
+- **Privacy-preserving credentials** — combine with `nostr-attestations` (kind 31000) for zero-knowledge attestations
+- **Compliance checks** — prove a value satisfies a regulatory threshold without logging it
+
+---
+
+## Related Packages
+
+- `nostr-attestations` — NIP-VA kind 31000 attestation events (attach proofs as content or tags)
+- `ring-sig` — SAG/LSAG ring signatures for anonymous group membership proofs
+- `@forgesworn/shamir-words` — Shamir secret sharing with BIP-39 word encoding
