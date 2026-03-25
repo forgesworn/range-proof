@@ -1,3 +1,3 @@
 # Security
 
-If you discover a security vulnerability, please report it privately via [GitHub Security Advisories](https://github.com/forgesworn/@forgesworn/range-proof/security/advisories/new).
+If you discover a security vulnerability, please report it privately via [GitHub Security Advisories](https://github.com/forgesworn/range-proof/security/advisories/new).

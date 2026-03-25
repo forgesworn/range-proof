@@ -3,8 +3,8 @@
 ## Setup
 
 ```bash
-git clone https://github.com/forgesworn/@forgesworn/range-proof.git
-cd @forgesworn/range-proof
+git clone https://github.com/forgesworn/range-proof.git
+cd range-proof
 npm install
 npm test
 ```
