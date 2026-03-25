@@ -1,3 +1,10 @@
+## [1.0.4](https://github.com/forgesworn/range-proof/compare/v1.0.3...v1.0.4) (2026-03-25)
+
+
+### Bug Fixes
+
+* remove broken example (API signatures mismatched) ([e3ccbcc](https://github.com/forgesworn/range-proof/commit/e3ccbccfcc385e0c668d3f36251ad0bd08ade38a))
+
 ## [1.0.3](https://github.com/forgesworn/range-proof/compare/v1.0.2...v1.0.3) (2026-03-20)
 
 
