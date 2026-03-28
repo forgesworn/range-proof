@@ -1,0 +1,34 @@
+# @forgesworn/range-proof — Cursor Rules
+
+## Project
+
+Pedersen commitment range proofs on secp256k1. Pure TypeScript, ESM-only. Runtime deps: @noble/curves, @noble/hashes.
+
+## Commands
+
+- Build: `npm run build`
+- Test: `npm test`
+- Typecheck: `npm run typecheck`
+
+## Architecture
+
+- `src/index.ts` — public re-exports
+- `src/range-proof.ts` — main API (commitments, range proofs, age helpers, serialisation)
+- `src/utils.ts` — crypto primitives (point arithmetic, generators G/H, hashToScalar)
+- `src/errors.ts` — error hierarchy (RangeProofError > ValidationError, CryptoError)
+
+## Crypto Safety
+
+- NEVER modify Fiat-Shamir domain separators (pedersen-bit-proof-v1, pedersen-sum-binding-v1, pedersen-commitment-binding-v1)
+- NEVER expose blinding factors in proofs or logs
+- NEVER implement custom point arithmetic — use @noble/curves
+- NEVER change the H generator derivation seed ('secp256k1-pedersen-H-v1')
+- Always use scalarEqual() for scalar comparison (constant-time)
+- Deserialisation must validate all hex inputs — do not weaken checks
+
+## Conventions
+
+- British English everywhere
+- ESM-only — .js extensions in all imports
+- Commit messages: type: description (feat:, fix:, chore:, refactor:, docs:)
+- Semantic-release on main — work on branches
