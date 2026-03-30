@@ -42,10 +42,12 @@ export function scalarToHex(s: bigint): string {
   return s.toString(16).padStart(64, '0');
 }
 
-/** Convert hex to bigint scalar, validated and reduced mod N */
+/** Convert hex to bigint scalar, validated and canonical (must be < N) */
 export function hexToScalar(hex: string): bigint {
   if (!/^[0-9a-f]{1,64}$/i.test(hex)) throw new ValidationError('Invalid scalar hex');
-  return mod(BigInt('0x' + hex));
+  const value = BigInt('0x' + hex);
+  if (value >= N) throw new ValidationError('Non-canonical scalar: value >= curve order N');
+  return value;
 }
 
 /** Constant-time equality check for two scalars (compared as 32-byte arrays) */
@@ -62,7 +64,14 @@ export function scalarEqual(a: bigint, b: bigint): boolean {
  *  challenges. A wider hash (e.g. SHA-512) would eliminate the bias entirely
  *  per RFC 9380 hash-to-field, but is not required at this security level. */
 export function hashToScalar(domain: Uint8Array, ...parts: Uint8Array[]): bigint {
-  const data = concatBytes(domain, ...parts);
+  // Length-prefix each part to prevent ambiguous concatenation
+  const prefixed: Uint8Array[] = [domain];
+  for (const part of parts) {
+    const len = new Uint8Array(4);
+    new DataView(len.buffer).setUint32(0, part.length, false);
+    prefixed.push(len, part);
+  }
+  const data = concatBytes(...prefixed);
   const h = sha256(data);
   return mod(BigInt('0x' + bytesToHex(h)));
 }
