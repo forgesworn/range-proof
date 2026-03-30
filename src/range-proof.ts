@@ -1,7 +1,7 @@
 // Pedersen Commitments + Range Proofs on secp256k1
 // Proves "value is in [min, max]" without revealing the exact value.
 
-import { hexToBytes, utf8ToBytes } from '@noble/hashes/utils';
+import { hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import {
   Point,
   type ProjectivePoint,
@@ -18,7 +18,7 @@ import {
 import { ValidationError, CryptoError } from './errors.js';
 
 function pointToBytes(p: ProjectivePoint): Uint8Array {
-  return p.toRawBytes(true);
+  return p.toBytes();
 }
 
 const DOMAIN_BIT_PROOF = 'pedersen-bit-proof-v1';
