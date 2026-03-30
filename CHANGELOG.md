@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/forgesworn/range-proof/compare/v1.0.4...v1.1.0) (2026-03-30)
+
+
+### Features
+
+* upgrade @noble/curves and @noble/hashes to v2 ([4ac3f8a](https://github.com/forgesworn/range-proof/commit/4ac3f8ae8e1cb2c6febace94e657bc4ae50ce0b2))
+
 ## [1.0.4](https://github.com/forgesworn/range-proof/compare/v1.0.3...v1.0.4) (2026-03-25)
 
 
