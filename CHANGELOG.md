@@ -1,3 +1,21 @@
+# [2.0.0](https://github.com/forgesworn/range-proof/compare/v1.1.0...v2.0.0) (2026-03-30)
+
+
+* fix!: harden crypto primitives, remove phantom dependencies ([5fdfa44](https://github.com/forgesworn/range-proof/commit/5fdfa444999914496bab9642f3cf16378bdd403b))
+
+
+### BREAKING CHANGES
+
+* hashToScalar now length-prefixes each part before
+concatenation, preventing ambiguous input collisions. Existing proofs
+will not verify with this version.
+
+- hexToScalar rejects non-canonical scalars >= curve order N
+- hashToScalar adds 4-byte big-endian length prefix per part
+- Remove circular self-dependency (@forgesworn/range-proof)
+- Remove phantom @forgesworn/ring-sig dependency
+- Restore accidentally deleted src/range-proof.ts
+
 # [1.1.0](https://github.com/forgesworn/range-proof/compare/v1.0.4...v1.1.0) (2026-03-30)
 
 
