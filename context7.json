@@ -1,0 +1,10 @@
+{
+  "projectTitle": "range-proof",
+  "description": "Pedersen commitment range proofs on secp256k1 — prove a value is in range without revealing it. Pure TypeScript.",
+  "excludeFolders": ["node_modules", "dist", "coverage", "src", "tests", ".github", ".changeset"],
+  "rules": [
+    "range-proof uses @noble/curves v2 for elliptic curve operations.",
+    "Proofs are non-interactive — generate once, verify anywhere.",
+    "Use for age verification, balance proofs, or any scenario where you need to prove a number is within bounds without disclosing it."
+  ]
+}
