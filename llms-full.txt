@@ -4,7 +4,7 @@
 
 GitHub: https://github.com/forgesworn/range-proof
 npm: https://www.npmjs.com/package/@forgesworn/range-proof
-Version: 1.0.3
+Version: 2.0.0
 
 ## Install
 
@@ -135,7 +135,7 @@ Verifies a range proof. Returns `true` only if all of the following hold:
 6. `proof.min === expectedMin`, `proof.max === expectedMax`
 7. Binding context matches `expectedBindingContext`
 
-Returns `false` (not throws) on tampered proofs, invalid hex, or mismatched parameters.
+Returns `false` (not throws) on tampered proofs, invalid hex, or mismatched parameters. The commitment embedded in the proof is verified algebraically (the commitment-binding Schnorr proof proves `C` is bound to the lower-range commitment) -- no separate manual commitment check is needed.
 
 ```typescript
 const ok = verifyRangeProof(proof, 0, 100);     // true
@@ -305,11 +305,118 @@ class CryptoError extends RangeProofError {
 
 ---
 
+## Error Handling Patterns
+
+### Catching specific error types
+
+```typescript
+import {
+  createRangeProof, verifyRangeProof,
+  ValidationError, CryptoError, RangeProofError
+} from '@forgesworn/range-proof';
+
+try {
+  const proof = createRangeProof(value, min, max, bindingContext);
+  const valid = verifyRangeProof(proof, min, max, bindingContext);
+} catch (err) {
+  if (err instanceof ValidationError) {
+    // Malformed inputs: negative values, non-integers, value outside [min, max],
+    // bad age range format, context > 1024 bytes
+    console.error('Invalid input:', err.message);
+  } else if (err instanceof CryptoError) {
+    // Cryptographic constraint violated: range exceeds 2^32
+    console.error('Crypto error:', err.message);
+  } else if (err instanceof RangeProofError) {
+    // Catch-all for any library error
+    console.error('Range proof error:', err.message);
+  }
+}
+```
+
+### Handling serialisation errors
+
+```typescript
+import {
+  serializeRangeProof, deserializeRangeProof, ValidationError
+} from '@forgesworn/range-proof';
+
+// Serialisation does not throw (proof is already valid)
+const json = serializeRangeProof(proof);
+
+// Deserialisation validates all fields — catch ValidationError
+try {
+  const recovered = deserializeRangeProof(json);
+} catch (err) {
+  if (err instanceof ValidationError) {
+    // Invalid hex, bad point format, wrong array length, oversized context, etc.
+    console.error('Malformed proof JSON:', err.message);
+  }
+}
+```
+
+### Extending error classes
+
+The error hierarchy is designed for subclassing. Custom validators can throw library-compatible errors:
+
+```typescript
+import { ValidationError } from '@forgesworn/range-proof';
+
+class PolicyError extends ValidationError {
+  constructor(policy: string) {
+    super(`Policy violation: ${policy}`);
+    this.name = 'PolicyError';
+  }
+}
+
+// Callers catching ValidationError will also catch PolicyError
+try {
+  if (age < 0) throw new PolicyError('age must be non-negative');
+} catch (err) {
+  if (err instanceof ValidationError) {
+    // Catches both ValidationError and PolicyError
+  }
+}
+```
+
+---
+
 ## Cryptographic Design
 
 ### Generator H
 
-The second generator `H` is a nothing-up-my-sleeve point: derived by hashing the string `'secp256k1-pedersen-H-v1'` to a curve point. No one knows `log_G(H)`, which is essential for the binding property of Pedersen commitments.
+The second generator `H` is a nothing-up-my-sleeve point: derived by hashing the string `'secp256k1-pedersen-H-v1'` to a curve point via try-and-increment. No one knows `log_G(H)`, which is essential for the binding property of Pedersen commitments.
+
+**Algorithm (runnable with @noble/curves v2):**
+
+```typescript
+import { secp256k1 } from '@noble/curves/secp256k1';
+import { sha256 } from '@noble/hashes/sha2';
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils';
+
+function deriveGeneratorH(): typeof secp256k1.Point.BASE {
+  const seed = utf8ToBytes('secp256k1-pedersen-H-v1');
+  for (let i = 0; i < 256; i++) {
+    const buf = new Uint8Array(seed.length + 1);
+    buf.set(seed);
+    buf[seed.length] = i;
+    const h = sha256(buf);
+    const compressedHex = '02' + bytesToHex(h);  // Try even-y prefix
+    try {
+      const point = secp256k1.Point.fromHex(compressedHex);
+      point.assertValidity();  // Confirms point is on the curve and in the prime-order subgroup
+      return point;
+    } catch {
+      continue;  // SHA-256 output was not a valid x-coordinate; try next counter
+    }
+  }
+  throw new Error('Failed to derive H');
+}
+
+const H = deriveGeneratorH();
+// H is deterministic — every implementation must produce the same point
+```
+
+The try-and-increment approach hashes `seed || counter` for `counter = 0, 1, 2, ...`, interprets the hash as a compressed x-coordinate with `02` prefix, and accepts the first valid curve point. This is deterministic and reproducible across implementations.
 
 ### CDS OR-Composition
 
@@ -346,6 +453,130 @@ An optional UTF-8 string (max 1024 bytes) is included in all Fiat-Shamir hash in
 - **Salary negotiation** — prove a salary falls within a band without naming the figure
 - **Privacy-preserving credentials** — combine with `nostr-attestations` (kind 31000) for zero-knowledge attestations
 - **Compliance checks** — prove a value satisfies a regulatory threshold without logging it
+
+---
+
+## Worked Examples
+
+### Credit score proof with error handling
+
+```typescript
+import {
+  createRangeProof, verifyRangeProof, serializeRangeProof,
+  deserializeRangeProof, ValidationError, CryptoError
+} from '@forgesworn/range-proof';
+
+// Prover: prove credit score is in [300, 850] without revealing exact score
+function proveScore(score: number, subjectPubkey: string): string {
+  try {
+    const proof = createRangeProof(score, 300, 850, subjectPubkey);
+    return serializeRangeProof(proof);
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      throw new Error(`Invalid score input: ${err.message}`);
+    }
+    throw err;
+  }
+}
+
+// Verifier: check the proof (receives JSON + expected context)
+function verifyScore(proofJson: string, subjectPubkey: string): boolean {
+  try {
+    const proof = deserializeRangeProof(proofJson);
+    return verifyRangeProof(proof, 300, 850, subjectPubkey);
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      console.error('Malformed proof:', err.message);
+      return false;
+    }
+    throw err;
+  }
+}
+
+const json = proveScore(720, 'abc123pubkey');
+const ok = verifyScore(json, 'abc123pubkey');   // true
+const bad = verifyScore(json, 'wrong-pubkey');  // false — context mismatch
+```
+
+### Multi-proof verification session (same identity)
+
+Verify multiple range proofs bound to the same subject in a single session:
+
+```typescript
+import {
+  createRangeProof, verifyRangeProof, ValidationError
+} from '@forgesworn/range-proof';
+
+interface ProofCheck {
+  label: string;
+  proof: ReturnType<typeof createRangeProof>;
+  min: number;
+  max: number;
+}
+
+// Generate a real secp256k1 public key for binding context
+import { secp256k1 } from '@noble/curves/secp256k1';
+import { bytesToHex } from '@noble/hashes/utils';
+const privKey = secp256k1.utils.randomPrivateKey();
+const pubKey = bytesToHex(secp256k1.getPublicKey(privKey, true)); // compressed hex
+
+// Create multiple proofs bound to the same identity
+const checks: ProofCheck[] = [
+  {
+    label: 'age',
+    proof: createRangeProof(25, 18, 150, pubKey),
+    min: 18,
+    max: 150,
+  },
+  {
+    label: 'credit-score',
+    proof: createRangeProof(720, 300, 850, pubKey),
+    min: 300,
+    max: 850,
+  },
+  {
+    label: 'income-bracket',
+    proof: createRangeProof(55000, 30000, 100000, pubKey),
+    min: 30000,
+    max: 100000,
+  },
+];
+
+// Verify all proofs in a single session
+const results = checks.map(({ label, proof, min, max }) => ({
+  label,
+  valid: verifyRangeProof(proof, min, max, pubKey),
+}));
+
+const allValid = results.every(r => r.valid);
+console.log('All proofs valid:', allValid); // true
+
+// If any fail, identify which ones
+const failures = results.filter(r => !r.valid);
+if (failures.length > 0) {
+  console.error('Failed checks:', failures.map(f => f.label));
+}
+```
+
+### Generating a real public key for binding context
+
+```typescript
+import { secp256k1 } from '@noble/curves/secp256k1';
+import { bytesToHex } from '@noble/hashes/utils';
+import { createRangeProof, verifyRangeProof } from '@forgesworn/range-proof';
+
+// Generate a secp256k1 key pair
+const privateKey = secp256k1.utils.randomPrivateKey();
+const publicKey = bytesToHex(secp256k1.getPublicKey(privateKey, true));
+// publicKey is a 66-char compressed hex string (02/03 prefix + 32 bytes)
+
+// Use the public key as binding context
+const proof = createRangeProof(25, 18, 150, publicKey);
+
+// Verifier must supply the same public key
+const valid = verifyRangeProof(proof, 18, 150, publicKey);           // true
+const transplant = verifyRangeProof(proof, 18, 150, 'other-pubkey'); // false
+```
 
 ---
 
