@@ -79,11 +79,78 @@ const json = serializeRangeProof(proof);
 const proof2 = deserializeRangeProof(json);
 ```
 
-## Error classes
+## Error Handling
 
-- `RangeProofError` — base class
-- `ValidationError` — malformed inputs, out-of-range values, bad JSON
-- `CryptoError` — range too large, cryptographic failures
+Three error classes, all importable from the package:
+
+```typescript
+import {
+  RangeProofError,   // base class
+  ValidationError,   // malformed inputs, out-of-range values, bad JSON
+  CryptoError,       // range too large, cryptographic failures
+} from '@forgesworn/range-proof';
+```
+
+### Which functions throw what
+
+**`createRangeProof`** throws on invalid inputs:
+
+```typescript
+try {
+  const proof = createRangeProof(value, min, max, bindingContext);
+} catch (err) {
+  if (err instanceof ValidationError) {
+    // 'Range proof values must be safe integers'
+    // 'Minimum must be non-negative'
+    // 'Maximum must be >= minimum'
+    // 'Value is not within the specified range'
+    // 'Binding context exceeds maximum length (1024 bytes)'
+  }
+  if (err instanceof CryptoError) {
+    // 'Range too large for range proof (max 2^32)'
+  }
+}
+```
+
+**`verifyRangeProof`** never throws — it returns `false` for any invalid or tampered
+proof. This is a deliberate design choice: verification is a boolean question.
+
+```typescript
+const valid = verifyRangeProof(proof, min, max);
+// valid is true or false — no exceptions
+```
+
+**`deserializeRangeProof`** throws `ValidationError` for malformed JSON, missing fields,
+or invalid hex values. This is where you should handle errors when loading proofs from
+untrusted sources:
+
+```typescript
+import {
+  deserializeRangeProof,
+  verifyRangeProof,
+  ValidationError,
+} from '@forgesworn/range-proof';
+
+// Full verification pipeline with error handling
+function verifyProofFromJson(
+  json: string,
+  expectedMin: number,
+  expectedMax: number,
+  expectedContext?: string,
+): boolean {
+  try {
+    const proof = deserializeRangeProof(json);
+    return verifyRangeProof(proof, expectedMin, expectedMax, expectedContext);
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      // Malformed proof data — reject
+      console.error('Invalid proof format:', err.message);
+      return false;
+    }
+    throw err; // unexpected error — re-throw
+  }
+}
+```
 
 ## Cryptography
 
@@ -91,6 +158,35 @@ const proof2 = deserializeRangeProof(json);
 - **Bit-decomposition range proofs**: CDS OR-composition proving each bit is 0 or 1, with a sum-binding Schnorr proof tying the bits to the overall range constraint.
 - **Fiat-Shamir**: domain-separated with `'pedersen-bit-proof-v1'` and `'pedersen-sum-binding-v1'`.
 - Maximum range: 2^32.
+
+### Generator H Derivation
+
+The second generator `H` is critical to Pedersen commitment security. Nobody must know
+`log_G(H)` — if they did, they could open a commitment to any value. `H` is derived
+deterministically using a nothing-up-my-sleeve construction:
+
+```
+Algorithm: try-and-increment hash-to-point
+
+1. seed = UTF-8 bytes of 'secp256k1-pedersen-H-v1'    (23 bytes)
+2. For counter i = 0, 1, 2, ... up to 255:
+   a. buf = seed || byte(i)                            (24 bytes)
+   b. h = SHA-256(buf)                                 (32 bytes)
+   c. candidate = 0x02 || h                            (33 bytes — compressed point, even Y)
+   d. If candidate is a valid secp256k1 point → H = candidate; stop
+   e. Otherwise → increment i and retry
+3. If no valid point found in 256 iterations → throw CryptoError
+```
+
+In practice, counter `i = 0` produces a valid point on the first try. The algorithm is
+deterministic — every implementation produces the same `H` from the same seed string.
+
+The security property: `H` is derived entirely from a fixed ASCII string with no
+trapdoor. The hash acts as a random oracle, and nobody can compute `log_G(H)` without
+breaking the discrete logarithm assumption on secp256k1.
+
+This is the same "hash-and-pray" technique used by Bulletproofs (Bünz et al. 2018) and
+other Pedersen-based protocols where a second generator is needed without a trusted setup.
 
 ## Part of the ForgeSworn Toolkit
 
