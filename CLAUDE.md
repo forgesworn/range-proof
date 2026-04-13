@@ -42,7 +42,7 @@ Runtime dependencies: `@noble/curves`, `@noble/hashes` only. ESM-only (`"type": 
 - **ESM-only** — all imports use `.js` extensions.
 - **Commit messages:** `type: description` format (e.g. `feat:`, `fix:`, `chore:`, `refactor:`, `docs:`).
 - **No `Co-Authored-By` lines** in commits.
-- **Semantic-release on main** — every `feat:`/`fix:` push to main auto-publishes a new npm version. Work on branches; merge to main only when a logical chunk is complete.
+- **Anvil auto-release on main** — every `feat:`/`fix:` push to main runs `forgesworn/anvil@v0` (`auto-release.yml` bumps the version and creates a GitHub Release; `release.yml` runs pre-publish gates and publishes to npm via OIDC). Work on branches; merge to main only when a logical chunk is complete.
 
 ## Testing
 
