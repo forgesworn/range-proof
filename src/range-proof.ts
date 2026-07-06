@@ -14,6 +14,7 @@ import {
   scalarEqual,
   G,
   H,
+  N,
 } from './utils.js';
 import { ValidationError, CryptoError } from './errors.js';
 
@@ -41,6 +42,27 @@ function isValidCompressedPoint(hex: string): boolean {
 
 function isValidScalarHex(hex: string): boolean {
   return HEX_SCALAR_64.test(hex);
+}
+
+function isValidCurvePointHex(hex: string): boolean {
+  if (!isValidCompressedPoint(hex)) return false;
+  try {
+    const point = Point.fromHex(hex);
+    point.assertValidity();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isCanonicalScalarHex(hex: string): boolean {
+  if (!isValidScalarHex(hex)) return false;
+  try {
+    hexToScalar(hex);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function normalizeBindingContext(bindingContext?: string): string | undefined {
@@ -110,7 +132,13 @@ export function commit(value: number, blinding?: bigint): PedersenCommitment {
 
   const v = BigInt(value);
   const r = blinding ?? randomScalar();
-  if (blinding !== undefined && mod(r) === 0n) throw new ValidationError('Blinding factor must be non-zero');
+  if (blinding !== undefined) {
+    if (typeof blinding !== 'bigint') throw new ValidationError('Blinding factor must be a bigint');
+    if (blinding === 0n) throw new ValidationError('Blinding factor must be non-zero');
+    if (blinding < 0n || blinding >= N) {
+      throw new ValidationError('Blinding factor must be a canonical scalar in [1, N-1]');
+    }
+  }
 
   // C = v*G + r*H
   const vG = safeMultiply(G, v);
@@ -656,7 +684,7 @@ export function deserializeRangeProof(json: string): RangeProof {
   if (typeof p.bits !== 'number' || typeof p.commitment !== 'string') {
     throw new ValidationError('Invalid range proof: missing bits or commitment');
   }
-  if (!isValidCompressedPoint(p.commitment as string)) {
+  if (!isValidCurvePointHex(p.commitment as string)) {
     throw new ValidationError('Invalid range proof: commitment is not valid compressed-point hex');
   }
   if (!Number.isSafeInteger(p.bits) || (p.bits as number) < 1 || (p.bits as number) > 32) {
@@ -676,19 +704,19 @@ export function deserializeRangeProof(json: string): RangeProof {
   if (typeof p.lowerCommitment !== 'string' || typeof p.upperCommitment !== 'string') {
     throw new ValidationError('Invalid range proof: missing lowerCommitment/upperCommitment');
   }
-  if (!isValidCompressedPoint(p.lowerCommitment as string) || !isValidCompressedPoint(p.upperCommitment as string)) {
+  if (!isValidCurvePointHex(p.lowerCommitment as string) || !isValidCurvePointHex(p.upperCommitment as string)) {
     throw new ValidationError('Invalid range proof: lowerCommitment/upperCommitment is not valid compressed-point hex');
   }
   if (typeof p.sumBindingE !== 'string' || typeof p.sumBindingS !== 'string') {
     throw new ValidationError('Invalid range proof: missing sumBindingE/sumBindingS');
   }
-  if (!isValidScalarHex(p.sumBindingE as string) || !isValidScalarHex(p.sumBindingS as string)) {
+  if (!isCanonicalScalarHex(p.sumBindingE as string) || !isCanonicalScalarHex(p.sumBindingS as string)) {
     throw new ValidationError('Invalid range proof: sumBindingE/sumBindingS is not valid scalar hex');
   }
   if (typeof p.commitBindingE !== 'string' || typeof p.commitBindingS !== 'string') {
     throw new ValidationError('Invalid range proof: missing commitBindingE/commitBindingS');
   }
-  if (!isValidScalarHex(p.commitBindingE as string) || !isValidScalarHex(p.commitBindingS as string)) {
+  if (!isCanonicalScalarHex(p.commitBindingE as string) || !isCanonicalScalarHex(p.commitBindingS as string)) {
     throw new ValidationError('Invalid range proof: commitBindingE/commitBindingS is not valid scalar hex');
   }
   // Validate bit proof array contents
@@ -699,11 +727,11 @@ export function deserializeRangeProof(json: string): RangeProof {
         typeof bpRec.s0 !== 'string' || typeof bpRec.e1 !== 'string' || typeof bpRec.s1 !== 'string') {
       throw new ValidationError('Invalid range proof: bit proof missing required fields');
     }
-    if (!isValidCompressedPoint(bpRec.commitment as string)) {
+    if (!isValidCurvePointHex(bpRec.commitment as string)) {
       throw new ValidationError('Invalid range proof: bit proof commitment is not valid compressed-point hex');
     }
-    if (!isValidScalarHex(bpRec.e0 as string) || !isValidScalarHex(bpRec.s0 as string) ||
-        !isValidScalarHex(bpRec.e1 as string) || !isValidScalarHex(bpRec.s1 as string)) {
+    if (!isCanonicalScalarHex(bpRec.e0 as string) || !isCanonicalScalarHex(bpRec.s0 as string) ||
+        !isCanonicalScalarHex(bpRec.e1 as string) || !isCanonicalScalarHex(bpRec.s1 as string)) {
       throw new ValidationError('Invalid range proof: bit proof scalar is not valid hex');
     }
   }

@@ -9,6 +9,7 @@ import {
   serializeRangeProof,
   deserializeRangeProof,
 } from '../src/range-proof.js';
+import { N } from '../src/utils.js';
 
 describe('range-proof', () => {
   describe('Pedersen commitments', () => {
@@ -292,6 +293,12 @@ describe('range-proof', () => {
       expect(() => commit(42, 0n)).toThrow('Blinding factor must be non-zero');
     });
 
+    it('commit() rejects non-canonical blinding factors', () => {
+      expect(() => commit(42, -1n)).toThrow('Blinding factor must be a canonical scalar');
+      expect(() => commit(42, N)).toThrow('Blinding factor must be a canonical scalar');
+      expect(() => commit(42, N + 1n)).toThrow('Blinding factor must be a canonical scalar');
+    });
+
     it('verifyCommitment throws on wrong types', () => {
       expect(() => verifyCommitment(123 as unknown as string, 42, 'ff'.repeat(32))).toThrow('commitment must be a string');
       expect(() => verifyCommitment('02' + 'ab'.repeat(32), 3.14, 'ff'.repeat(32))).toThrow('value must be a safe integer');
@@ -352,6 +359,22 @@ describe('range-proof', () => {
       const obj = JSON.parse(json);
       obj.lowerProof = obj.lowerProof.slice(0, 1);
       expect(() => deserializeRangeProof(JSON.stringify(obj))).toThrow('proof array length does not match bits');
+    });
+
+    it('deserialisation rejects point-shaped hex that is not a valid curve point', () => {
+      const proof = createRangeProof(7, 5, 10);
+      const json = serializeRangeProof(proof);
+      const obj = JSON.parse(json);
+      obj.commitment = '02' + 'ff'.repeat(32);
+      expect(() => deserializeRangeProof(JSON.stringify(obj))).toThrow('not valid compressed-point hex');
+    });
+
+    it('deserialisation rejects non-canonical scalar hex', () => {
+      const proof = createRangeProof(7, 5, 10);
+      const json = serializeRangeProof(proof);
+      const obj = JSON.parse(json);
+      obj.sumBindingE = 'ff'.repeat(32);
+      expect(() => deserializeRangeProof(JSON.stringify(obj))).toThrow('not valid scalar hex');
     });
 
     it('rejects binding context exceeding maximum length', () => {
