@@ -159,8 +159,8 @@ function verifyProofFromJson(
 ## Cryptography
 
 - **Pedersen commitments**: `C = v*G + r*H` where `H` is a nothing-up-my-sleeve second generator derived by hashing `'secp256k1-pedersen-H-v1'` to a curve point.
-- **Bit-decomposition range proofs**: CDS OR-composition proving each bit is 0 or 1, with a sum-binding Schnorr proof tying the bits to the overall range constraint.
-- **Fiat-Shamir**: domain-separated with `'pedersen-bit-proof-v1'` and `'pedersen-sum-binding-v1'`.
+- **Bit-decomposition range proofs**: CDS OR-composition proving each bit is 0 or 1, with sum-binding and commitment-binding Schnorr proofs tying the bits to the range constraint and public commitment.
+- **Fiat-Shamir**: domain-separated with `'pedersen-bit-proof-v1'`, `'pedersen-sum-binding-v1'`, and `'pedersen-commitment-binding-v1'`.
 - Maximum range: 2^32.
 
 ### Generator H Derivation
