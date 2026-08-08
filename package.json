@@ -36,12 +36,12 @@
     "url": "https://github.com/forgesworn/range-proof.git"
   },
   "dependencies": {
-    "@noble/curves": "^2.0.1",
-    "@noble/hashes": "^2.0.1"
+    "@noble/curves": "^2.3.0",
+    "@noble/hashes": "^2.3.0"
   },
   "devDependencies": {
-    "typescript": "^6.0.2",
-    "vitest": "^4.1.4"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
   },
   "publishConfig": {
     "provenance": true
