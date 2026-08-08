@@ -539,6 +539,11 @@ export function createRangeProof(value: number, min: number, max: number, bindin
 /**
  * Verify a range proof.
  *
+ * Note: the commitment is taken from the proof itself. Callers must
+ * independently anchor `proof.commitment` to externally known state (e.g. a
+ * commitment previously published by the prover); this function does not
+ * attest to whose commitment it is.
+ *
  * @param proof - The range proof to verify
  * @param expectedMin - The minimum bound the verifier expects
  * @param expectedMax - The maximum bound the verifier expects

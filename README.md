@@ -124,6 +124,12 @@ const valid = verifyRangeProof(proof, min, max);
 // valid is true or false — no exceptions
 ```
 
+The commitment is taken from the proof itself. Verification answers "does this
+proof demonstrate a value in [min, max] for this commitment?" — it does not
+attest to whose commitment it is. Callers must independently anchor
+`proof.commitment` to externally known state (e.g. a commitment the prover
+previously published or that is bound to their identity).
+
 **`deserializeRangeProof`** throws `ValidationError` for malformed JSON, missing fields,
 or invalid hex values. This is where you should handle errors when loading proofs from
 untrusted sources:
