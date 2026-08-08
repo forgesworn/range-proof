@@ -7,6 +7,14 @@
 
 # [2.0.0](https://github.com/forgesworn/range-proof/compare/v1.1.0...v2.0.0) (2026-03-30)
 
+## 2.0.4 (2026-08-08)
+
+### Bug Fixes
+
+- regenerate pnpm-lock.yaml to patch vite and postcss vulnerabilities
+
+
+
 ## 2.0.3 (2026-07-06)
 
 ### Bug Fixes
