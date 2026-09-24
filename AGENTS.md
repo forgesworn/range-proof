@@ -1,4 +1,4 @@
-# AGENTS.md — @forgesworn/range-proof
+# AGENTS.md: @forgesworn/range-proof
 
 Instructions for AI coding agents working in this repository.
 
@@ -12,48 +12,68 @@ Runtime dependencies: `@noble/curves`, `@noble/hashes` only.
 
 ```bash
 npm install
-npm run build       # tsc — compiles to dist/
-npm test            # vitest run (55 tests, ~10s)
+npm run build       # tsc, compiles to dist/
+npm test            # vitest run
 npm run typecheck   # tsc --noEmit
 ```
 
-All three must pass before committing.
+All three must pass before committing. CI (`.github/workflows/ci.yml`) runs `npm ci`, `npm run typecheck`, `npm test` on pushes and pull requests.
 
 ## Architecture
 
 ```
 src/
-  index.ts        — Public re-exports (types + functions)
-  range-proof.ts  — Main API: Pedersen commitments, CDS OR-composition bit proofs,
+  index.ts        : public re-exports (types + functions)
+  range-proof.ts  : main API, Pedersen commitments, CDS OR-composition bit proofs,
                     sum-binding / commitment-binding Schnorr proofs, range proof
                     creation and verification, age range helpers, serialisation
-  utils.ts        — Crypto primitives: secp256k1 point arithmetic, scalar ops,
+  utils.ts        : crypto primitives, secp256k1 point arithmetic, scalar ops,
                     constant-time comparison, generator points (G, H), hashToScalar
-  errors.ts       — Error hierarchy: RangeProofError > ValidationError, CryptoError
+  errors.ts       : error hierarchy, RangeProofError > ValidationError, CryptoError
+tests/
+  range-proof.test.ts : test suite (Vitest)
+dist/             : compiled output (not committed)
 ```
 
 ## Public API
 
-- `createRangeProof(value, min, max, bindingContext?)` — prove value is in [min, max]
-- `verifyRangeProof(proof, expectedMin, expectedMax, expectedBindingContext?)` — verify
-- `createAgeRangeProof(age, ageRange, subjectPubkey?)` — convenience for age policies ("18+", "8-12")
-- `verifyAgeRangeProof(proof, expectedAgeRange, expectedSubjectPubkey?)` — verify age proof
-- `commit(value, blinding?)` — create a Pedersen commitment
-- `verifyCommitment(commitment, value, blinding)` — open and verify
-- `serializeRangeProof(proof)` / `deserializeRangeProof(json)` — JSON round-trip
+- `createRangeProof(value, min, max, bindingContext?)`: prove value is in [min, max]
+- `verifyRangeProof(proof, expectedMin, expectedMax, expectedBindingContext?)`: verify
+- `createAgeRangeProof(age, ageRange, subjectPubkey?)`: convenience for age policies ("18+", "8-12")
+- `verifyAgeRangeProof(proof, expectedAgeRange, expectedSubjectPubkey?)`: verify age proof
+- `commit(value, blinding?)`: create a Pedersen commitment
+- `verifyCommitment(commitment, value, blinding)`: open and verify
+- `serializeRangeProof(proof)` / `deserializeRangeProof(json)`: JSON round-trip
 
 ## Crypto Safety Rules
 
-- **Do not modify Fiat-Shamir domain separators** (`pedersen-bit-proof-v1`, `pedersen-sum-binding-v1`, `pedersen-commitment-binding-v1`). Changing these breaks all existing proofs.
-- **Do not expose blinding factors.** The `blinding` field in `PedersenCommitment` must never appear in range proofs or be transmitted to verifiers.
-- **Use @noble/curves for all EC operations.** Do not implement custom point arithmetic.
-- **Generator H must remain nothing-up-my-sleeve.** The seed `'secp256k1-pedersen-H-v1'` and derivation in `createGeneratorH()` must not change.
-- **Constant-time scalar comparison** via `scalarEqual()` — do not replace with `===` on bigints.
-- **Deserialisation validates all inputs** — compressed point format, scalar hex length, array bounds. Do not weaken these checks.
+- **Do not modify Fiat-Shamir domain separators** (`pedersen-bit-proof-v1`, `pedersen-sum-binding-v1`, `pedersen-commitment-binding-v1`). Changing these breaks all existing proofs and may introduce security vulnerabilities.
+- **Do not expose blinding factors.** The `blinding` field in `PedersenCommitment` is the committer's secret. It must never appear in range proofs or be transmitted to verifiers.
+- **Use @noble/curves for all EC operations.** Do not implement custom point arithmetic or scalar multiplication. The library's `safeMultiply` wrapper handles the zero-scalar edge case; do not call raw multiplication directly.
+- **Generator H must remain nothing-up-my-sleeve.** The seed `'secp256k1-pedersen-H-v1'` and derivation method in `createGeneratorH()` must not change, so anyone can verify nobody knows `log_G(H)`.
+- **Constant-time scalar comparison** via `scalarEqual()`, not `===` on bigints: timing side-channels matter in zero-knowledge code.
+- **Deserialisation validates all inputs**: compressed point format, scalar hex length, array bounds. Do not weaken these checks.
+- **CDS OR-composition**: bit proofs use Cramer-Damgard-Schoenmakers OR composition, so each bit is proven to be 0 or 1 without revealing which. The range proof decomposes the value into bits and combines them.
+- **Binding context**: a range proof can be bound to an external context (e.g. a subject's public key). A proof created with context X will not verify under context Y. Cover this in tests when adding proof logic.
 
 ## Conventions
 
-- **British English** in comments, docs, and error messages.
-- **ESM-only** — all imports use `.js` extensions.
+- **British English** in comments, docs, and error messages (serialise, colour, behaviour).
+- **ESM-only**, all imports use `.js` extensions.
+- **Amounts** as integers (no floats in crypto contexts).
 - **Commit messages:** `type: description` format (`feat:`, `fix:`, `chore:`, `refactor:`, `docs:`).
-- **Semantic-release on main** — work on branches, merge to main only when complete.
+- **No `Co-Authored-By` lines** in commits.
+- **Anvil auto-release on main**: every `feat:`/`fix:` push to main runs `forgesworn/anvil@v0` (`auto-release.yml` bumps the version and creates a GitHub Release; `release.yml` runs pre-publish gates and publishes to npm via OIDC). Work on branches; merge to main only when a logical chunk is complete.
+
+## Testing
+
+Tests use Vitest, in `tests/range-proof.test.ts`. Run with `npm test`. When adding new proof logic, include:
+
+- Happy-path verification (proof creates and verifies)
+- Rejection of out-of-range values
+- Rejection of tampered proofs (mutated commitments, swapped fields)
+- Context binding tests (proof with context X must not verify under context Y)
+
+## Verifying a Change
+
+Run `npm run typecheck`, `npm test` and `npm run build` before committing; all three gate CI and the anvil release. For changes touching `range-proof.ts` or `utils.ts`, check the Crypto Safety Rules above before merging.
