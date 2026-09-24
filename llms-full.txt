@@ -4,7 +4,6 @@
 
 GitHub: https://github.com/forgesworn/range-proof
 npm: https://www.npmjs.com/package/@forgesworn/range-proof
-Version: 2.0.0
 
 ## Install
 
