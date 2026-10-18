@@ -10,7 +10,7 @@ Install from npm:
 npm install @forgesworn/range-proof
 ```
 
-ESM-only. Requires Node.js 18+. Sole runtime dependencies: `@noble/curves` and `@noble/hashes`.
+ESM-only (no CommonJS build). Requires Node.js 20.19 or later, the floor declared by `@noble/curves` and `@noble/hashes`, which are the sole runtime dependencies. All functions are synchronous: they return values directly and never return Promises.
 
 Prove a value is in range:
 
@@ -24,7 +24,11 @@ const valid = verifyRangeProof(proof, 18, 150); // true
 Bind a proof to a subject identity (prevents transplant attacks):
 
 ```typescript
+import { createRangeProof, verifyRangeProof } from '@forgesworn/range-proof';
+
 const proof = createRangeProof(25, 18, 150, 'subject-pubkey-hex');
+const valid = verifyRangeProof(proof, 18, 150, 'subject-pubkey-hex'); // true
+const transplanted = verifyRangeProof(proof, 18, 150, 'other-subject'); // false
 ```
 
 ## Key Concepts
@@ -35,25 +39,37 @@ A Pedersen commitment `C = v*G + r*H` hides a value `v` behind a random blinding
 
 ### Range Proofs
 
-The library uses CDS OR-composition (Cramer-Damgard-Schoenmakers) to prove each bit of a decomposed value is 0 or 1, then ties the bits to the overall range constraint with sum-binding and commitment-binding Schnorr proofs. Fiat-Shamir domain separators (`pedersen-bit-proof-v1`, `pedersen-sum-binding-v1`, `pedersen-commitment-binding-v1`) make the interactive proofs non-interactive. Maximum range: 2^32.
+The library uses CDS OR-composition (Cramer-Damgard-Schoenmakers) to prove each bit of a decomposed value is 0 or 1, then ties the bits to the overall range constraint with sum-binding and commitment-binding Schnorr proofs. Fiat-Shamir domain separators (`pedersen-bit-proof-v1`, `pedersen-sum-binding-v1`, `pedersen-commitment-binding-v1`) make the interactive proofs non-interactive. Maximum range width: `max - min` may be at most 2^32 - 1 (32 bits), otherwise `createRangeProof` throws `CryptoError`. The limit applies to the width only; `value`, `min` and `max` themselves may be any non-negative safe integers.
 
 ### Binding Context
 
-An optional context string is included in all Fiat-Shamir challenges, binding the proof to a specific credential or identity. A proof created with one context will not verify under a different context.
+An optional context string (at most 1024 UTF-8 bytes; empty string means no context) is included in all Fiat-Shamir challenges, binding the proof to a specific credential or identity. A proof created with one context will not verify under a different context.
+
+### Anchoring the commitment (verifier responsibility)
+
+`verifyRangeProof` takes the commitment from the proof itself. It answers "does this proof show a value in `[min, max]` for `proof.commitment`?" and does not attest to whose commitment that is. Callers must independently anchor `proof.commitment` to externally known state (for example a commitment the prover previously published, or one bound to their identity), and must pass the expected range and binding context from their own policy, not from the proof. Do not treat a `true` result alone as proof that a particular person holds a value in range.
 
 ## API Surface
 
 ### Core Functions
 
-- `createRangeProof(value, min, max, bindingContext?)`: prove `value` is in `[min, max]`
-- `verifyRangeProof(proof, expectedMin, expectedMax, expectedBindingContext?)`: verify a range proof against expected public inputs
-- `createAgeRangeProof(age, ageRange, subjectPubkey?)`: convenience wrapper accepting `'18+'` or `'8-12'` format
-- `verifyAgeRangeProof(proof, expectedAgeRange, expectedSubjectPubkey?)`: verify an age range proof against an expected policy
+- `createRangeProof(value, min, max, bindingContext?): RangeProof`: prove `value` is in `[min, max]`. Throws `ValidationError` for invalid inputs and `CryptoError` if `max - min` exceeds 2^32 - 1
+- `verifyRangeProof(proof, expectedMin, expectedMax, expectedBindingContext?): boolean`: verify a range proof against expected public inputs. Never throws; returns `false` for anything invalid. See "Anchoring the commitment" above
+- `createAgeRangeProof(age, ageRange, subjectPubkey?): RangeProof`: convenience wrapper over `createRangeProof`; `subjectPubkey` is the binding context
+- `verifyAgeRangeProof(proof, expectedAgeRange, expectedSubjectPubkey?): boolean`: verify an age range proof against an expected policy. Never throws
+
+Age range grammar (digits only, no spaces, signs or decimals; leading zeros accepted):
+
+- `'min-max'`, for example `'8-12'` or `'13-17'`: the inclusive range `[min, max]`
+- `'min+'`, for example `'18+'`: the range `[min, 150]`; the upper bound is fixed at 150, so `'151+'` is invalid
+- A malformed string makes `createAgeRangeProof` throw `ValidationError` (`Invalid age range format (expected "min-max" or "min+")`) and `verifyAgeRangeProof` return `false`. Inverted bounds such as `'12-8'` or `'151+'` throw `ValidationError` (`Maximum must be >= minimum`) on create and give `false` on verify
 
 ### Pedersen Commitments
 
-- `commit(value, blinding?)`: create a Pedersen commitment; returns `{ commitment, blinding, value }`
-- `verifyCommitment(commitment, value, blinding)`: open and verify a commitment
+- `commit(value, blinding?): PedersenCommitment`: create a Pedersen commitment; returns `{ commitment, blinding, value }`. Optional `blinding` is a `bigint` in `[1, N-1]` (`N` is the secp256k1 group order); random if omitted. Throws `ValidationError` for a negative or non-integer `value`, or a blinding that is not a bigint, is `0n`, negative or `>= N`. The returned `blinding` is a 64-character zero-padded lowercase hex string
+- `verifyCommitment(commitment, value, blinding): boolean`: open and verify a commitment. `commitment` is compressed point hex (66 characters, `02`/`03` prefix); `blinding` is a hex string of 1 to 64 hex digits (any case, no `0x` prefix) below `N`, so pass back the string `commit` returned, not a bigint. Returns `false` for a wrong opening, malformed hex or an invalid point; throws `ValidationError` only for arguments of the wrong type (non-string `commitment` or `blinding`, `value` not a non-negative safe integer)
+
+`commit` is independent of range proofs: `createRangeProof` keeps its own blinding factor internal, so `proof.commitment` cannot be opened with `verifyCommitment`.
 
 ### Serialisation
 
@@ -62,14 +78,14 @@ An optional context string is included in all Fiat-Shamir challenges, binding th
 
 ### Types
 
-- `RangeProof`: the proof object (commitment, min, max, bits, bit proofs, binding proofs, optional context)
-- `PedersenCommitment`: `{ commitment: string, blinding: string, value: number }`
+- `RangeProof`: the proof object (`commitment`, `min`, `max`, `bits`, `lowerProof`, `upperProof`, `lowerCommitment`, `upperCommitment`, `sumBindingE`, `sumBindingS`, `commitBindingE`, `commitBindingS`, optional `context`). It contains no blinding factor or secret value and is safe to send to a verifier
+- `PedersenCommitment`: `{ commitment: string, blinding: string, value: number }`, where `commitment` is 66-character compressed point hex (public), `blinding` is 64-character hex (secret) and `value` is the committed number (secret)
 
 ### Error Classes
 
 - `RangeProofError`: base class
 - `ValidationError`: malformed inputs, out-of-range values, bad JSON
-- `CryptoError`: range too large, cryptographic failures
+- `CryptoError`: range width too large, cryptographic failures
 
 ## When To Use This
 
