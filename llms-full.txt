@@ -11,7 +11,7 @@ npm: https://www.npmjs.com/package/@forgesworn/range-proof
 npm install @forgesworn/range-proof
 ```
 
-Runtime dependencies: `@noble/curves`, `@noble/hashes`. ESM-only. Requires Node.js 18+. Browser-compatible.
+Runtime dependencies: `@noble/curves`, `@noble/hashes`. ESM-only (no CommonJS build). Requires Node.js 20.19 or later, the floor declared by both dependencies. Browser-compatible. All functions are synchronous: they return values directly and never return Promises.
 
 ---
 
@@ -99,12 +99,14 @@ Proves that `value` is in `[min, max]` without revealing `value`.
 - `min` must be non-negative
 - `max` must be `>= min`
 - `value` must be in `[min, max]`
-- Maximum range: `2^32` (throws `CryptoError` if exceeded)
+- Maximum range width: `max - min` may be at most `2^32 - 1` (32 bits); `createRangeProof` throws `CryptoError` beyond that. The limit applies to the width only: `value`, `min` and `max` themselves may be any non-negative safe integers
 - `bindingContext` — optional string included in all Fiat-Shamir challenges; a proof created with one context will not verify under a different context
 
-**Throws** `ValidationError` for invalid inputs, `CryptoError` if the range exceeds `2^32`.
+**Throws** `ValidationError` for invalid inputs, `CryptoError` if `max - min` exceeds `2^32 - 1`.
 
 ```typescript
+import { createRangeProof } from '@forgesworn/range-proof';
+
 const proof = createRangeProof(42, 0, 100);
 // proof.commitment — share this with the verifier
 // proof itself — share this with the verifier
@@ -134,9 +136,15 @@ Verifies a range proof. Returns `true` only if all of the following hold:
 6. `proof.min === expectedMin`, `proof.max === expectedMax`
 7. Binding context matches `expectedBindingContext`
 
-Returns `false` (not throws) on tampered proofs, invalid hex, or mismatched parameters. The commitment embedded in the proof is verified algebraically (the commitment-binding Schnorr proof proves `C` is bound to the lower-range commitment) -- no separate manual commitment check is needed.
+Returns `false` (not throws) on tampered proofs, invalid hex, or mismatched parameters. The commitment embedded in the proof is verified algebraically (the commitment-binding Schnorr proof proves `C` is bound to the lower-range commitment), but that only ties `C` to the proof itself.
+
+**Anchoring the commitment (caller responsibility).** The commitment is taken from the proof. Verification answers "does this proof show a value in `[min, max]` for `proof.commitment`?" and does not attest to whose commitment it is. Callers must independently anchor `proof.commitment` to externally known state (for example a commitment the prover previously published, or one bound to their identity). Pass `expectedMin`, `expectedMax` and `expectedBindingContext` from the verifier's own policy, never from the proof. A `true` result alone does not show that a particular person holds a value in range.
 
 ```typescript
+import { createRangeProof, verifyRangeProof } from '@forgesworn/range-proof';
+
+const proof = createRangeProof(42, 0, 100);
+
 const ok = verifyRangeProof(proof, 0, 100);     // true
 const fail = verifyRangeProof(proof, 0, 50);    // false — range mismatch
 ```
@@ -153,17 +161,20 @@ function createAgeRangeProof(
 ): RangeProof
 ```
 
-Convenience wrapper for age proofs. `ageRange` formats:
+Convenience wrapper over `createRangeProof` for age proofs. `ageRange` is digits only (no spaces, signs or decimals; leading zeros are accepted) in one of two formats:
 
-- `'18+'` — proves `age >= 18` (uses `[18, 150]` as the range)
-- `'8-12'` — proves `age in [8, 12]`
+- `'18+'` ("min+"): proves `age >= 18`, using `[18, 150]` as the range. The upper bound is fixed at 150, so `'151+'` is invalid
+- `'8-12'`, `'13-17'` ("min-max"): proves `age in [min, max]`, both inclusive
 
 `subjectPubkey` is used as the binding context.
 
-**Throws** `ValidationError` for invalid age range format (must match `"min-max"` or `"min+"`).
+**Throws** `ValidationError` for a malformed age range string (message `Invalid age range format (expected "min-max" or "min+")`), for inverted bounds such as `'12-8'` or `'151+'` (`Maximum must be >= minimum`), and for an `age` outside the range.
 
 ```typescript
+import { createAgeRangeProof } from '@forgesworn/range-proof';
+
 const proof = createAgeRangeProof(25, '18+', 'npub1...');
+const teen = createAgeRangeProof(15, '13-17');
 ```
 
 ---
@@ -178,10 +189,15 @@ function verifyAgeRangeProof(
 ): boolean
 ```
 
-Verify an age range proof. Returns `false` (not throws) on bad input or invalid proof.
+Verify an age range proof. Returns `false` (not throws) on a malformed or inverted `expectedAgeRange`, bad input or an invalid proof. The same commitment-anchoring caveat as `verifyRangeProof` applies.
 
 ```typescript
-const ok = verifyAgeRangeProof(proof, '18+', 'npub1...');
+import { createAgeRangeProof, verifyAgeRangeProof } from '@forgesworn/range-proof';
+
+const proof = createAgeRangeProof(25, '18+', 'npub1...');
+
+const ok = verifyAgeRangeProof(proof, '18+', 'npub1...');  // true
+const bad = verifyAgeRangeProof(proof, 'abc');             // false
 ```
 
 ---
@@ -197,16 +213,22 @@ function commit(value: number, blinding?: bigint): PedersenCommitment
 Create a Pedersen commitment `C = v*G + r*H`.
 
 - `value` must be a non-negative safe integer
-- `blinding` — optional blinding factor as `bigint`; random if not provided
-- Returns `{ commitment, blinding, value }` — keep `blinding` and `value` secret
+- `blinding`: optional blinding factor as a `bigint` in `[1, N-1]`, where `N` is the secp256k1 group order; random if not provided
+- Returns `{ commitment, blinding, value }`: keep `blinding` and `value` secret. `commitment` is 66-character compressed point hex; the returned `blinding` is a 64-character zero-padded lowercase hex string (a string, even though `commit` accepts a `bigint`)
 
 ```typescript
+import { commit } from '@forgesworn/range-proof';
+
 const c = commit(42);
 // c.commitment — share with verifier
 // c.blinding, c.value — keep secret
+
+const fixed = commit(42, 123456789n); // caller-supplied blinding factor
 ```
 
-**Throws** `ValidationError` for negative or non-integer values, or a zero blinding factor.
+**Throws** `ValidationError` for negative or non-integer values, and for a blinding factor that is not a `bigint`, is `0n`, is negative or is `>= N`.
+
+`commit` is independent of range proofs: `createRangeProof` keeps its own blinding factor internal, so `proof.commitment` cannot be opened with `verifyCommitment`.
 
 ---
 
@@ -222,11 +244,20 @@ function verifyCommitment(
 
 Open and verify a Pedersen commitment. Returns `true` if `commitment = value*G + blinding*H`.
 
+- `commitment`: compressed point hex (66 characters, `02`/`03` prefix)
+- `value`: non-negative safe integer
+- `blinding`: hex string of 1 to 64 hex digits (any case, no `0x` prefix) encoding a value below `N`. This is the string form `commit` returns, not a `bigint`
+
 ```typescript
+import { commit, verifyCommitment } from '@forgesworn/range-proof';
+
+const c = commit(42);
+
 const ok = verifyCommitment(c.commitment, 42, c.blinding); // true
+const wrong = verifyCommitment(c.commitment, 43, c.blinding); // false
 ```
 
-Returns `false` (not throws) on invalid inputs.
+Returns `false` (not throws) for a wrong opening, malformed hex or an invalid point. **Throws** `ValidationError` only when an argument has the wrong type: `commitment` or `blinding` not a string, or `value` not a non-negative safe integer.
 
 ---
 
@@ -248,7 +279,7 @@ Serialise a range proof to a JSON string. The output is suitable for storage or 
 function deserializeRangeProof(json: string): RangeProof
 ```
 
-Deserialise a range proof from a JSON string. Performs full input validation:
+Deserialise a range proof from a JSON string. The result is only structurally validated; it still has to pass `verifyRangeProof`. Performs full input validation:
 
 - Validates hex format for all commitment and scalar fields
 - Validates compressed point format (`02`/`03` prefix + 64 hex chars)
@@ -260,6 +291,12 @@ Deserialise a range proof from a JSON string. Performs full input validation:
 **Throws** `ValidationError` for any malformed input.
 
 ```typescript
+import {
+  createRangeProof, serializeRangeProof, deserializeRangeProof
+} from '@forgesworn/range-proof';
+
+const proof = createRangeProof(42, 0, 100);
+
 const json = serializeRangeProof(proof);
 const recovered = deserializeRangeProof(json);
 ```
@@ -300,7 +337,7 @@ class CryptoError extends RangeProofError {
 }
 ```
 
-**Triggers:** range exceeds `2^32`.
+**Triggers:** range width `max - min` exceeds `2^32 - 1`.
 
 ---
 
@@ -314,6 +351,11 @@ import {
   ValidationError, CryptoError, RangeProofError
 } from '@forgesworn/range-proof';
 
+const value = 25;
+const min = 18;
+const max = 150;
+const bindingContext = 'subject-pubkey-hex';
+
 try {
   const proof = createRangeProof(value, min, max, bindingContext);
   const valid = verifyRangeProof(proof, min, max, bindingContext);
@@ -323,7 +365,7 @@ try {
     // bad age range format, context > 1024 bytes
     console.error('Invalid input:', err.message);
   } else if (err instanceof CryptoError) {
-    // Cryptographic constraint violated: range exceeds 2^32
+    // Cryptographic constraint violated: max - min exceeds 2^32 - 1
     console.error('Crypto error:', err.message);
   } else if (err instanceof RangeProofError) {
     // Catch-all for any library error
@@ -336,8 +378,10 @@ try {
 
 ```typescript
 import {
-  serializeRangeProof, deserializeRangeProof, ValidationError
+  createRangeProof, serializeRangeProof, deserializeRangeProof, ValidationError
 } from '@forgesworn/range-proof';
+
+const proof = createRangeProof(42, 0, 100);
 
 // Serialisation does not throw (proof is already valid)
 const json = serializeRangeProof(proof);
@@ -368,6 +412,8 @@ class PolicyError extends ValidationError {
 }
 
 // Callers catching ValidationError will also catch PolicyError
+const age = -1;
+
 try {
   if (age < 0) throw new PolicyError('age must be non-negative');
 } catch (err) {
@@ -388,9 +434,9 @@ The second generator `H` is a nothing-up-my-sleeve point: derived by hashing the
 **Algorithm (runnable with @noble/curves v2):**
 
 ```typescript
-import { secp256k1 } from '@noble/curves/secp256k1';
-import { sha256 } from '@noble/hashes/sha2';
-import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils';
+import { secp256k1 } from '@noble/curves/secp256k1.js';
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js';
 
 function deriveGeneratorH(): typeof secp256k1.Point.BASE {
   const seed = utf8ToBytes('secp256k1-pedersen-H-v1');
@@ -514,9 +560,9 @@ interface ProofCheck {
 }
 
 // Generate a real secp256k1 public key for binding context
-import { secp256k1 } from '@noble/curves/secp256k1';
-import { bytesToHex } from '@noble/hashes/utils';
-const privKey = secp256k1.utils.randomPrivateKey();
+import { secp256k1 } from '@noble/curves/secp256k1.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
+const privKey = secp256k1.utils.randomSecretKey();
 const pubKey = bytesToHex(secp256k1.getPublicKey(privKey, true)); // compressed hex
 
 // Create multiple proofs bound to the same identity
@@ -560,12 +606,12 @@ if (failures.length > 0) {
 ### Generating a real public key for binding context
 
 ```typescript
-import { secp256k1 } from '@noble/curves/secp256k1';
-import { bytesToHex } from '@noble/hashes/utils';
+import { secp256k1 } from '@noble/curves/secp256k1.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import { createRangeProof, verifyRangeProof } from '@forgesworn/range-proof';
 
 // Generate a secp256k1 key pair
-const privateKey = secp256k1.utils.randomPrivateKey();
+const privateKey = secp256k1.utils.randomSecretKey();
 const publicKey = bytesToHex(secp256k1.getPublicKey(privateKey, true));
 // publicKey is a 66-char compressed hex string (02/03 prefix + 32 bytes)
 

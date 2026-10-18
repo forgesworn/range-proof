@@ -6,7 +6,7 @@ Instructions for AI coding agents working in this repository.
 
 Pedersen commitment range proofs on secp256k1. Proves a secret value lies within a public range `[min, max]` without revealing the value. Built on CDS OR-composition bit proofs with Fiat-Shamir domain separation. Pure TypeScript, ESM-only, browser-compatible.
 
-Runtime dependencies: `@noble/curves`, `@noble/hashes` only.
+Runtime dependencies: `@noble/curves`, `@noble/hashes` only. Both declare `engines: node >= 20.19.0`, so that is the Node floor (also set in `package.json` `engines`). The whole API is synchronous: no function returns a Promise.
 
 ## Build & Test
 
@@ -37,13 +37,17 @@ dist/             : compiled output (not committed)
 
 ## Public API
 
-- `createRangeProof(value, min, max, bindingContext?)`: prove value is in [min, max]
-- `verifyRangeProof(proof, expectedMin, expectedMax, expectedBindingContext?)`: verify
-- `createAgeRangeProof(age, ageRange, subjectPubkey?)`: convenience for age policies ("18+", "8-12")
-- `verifyAgeRangeProof(proof, expectedAgeRange, expectedSubjectPubkey?)`: verify age proof
-- `commit(value, blinding?)`: create a Pedersen commitment
-- `verifyCommitment(commitment, value, blinding)`: open and verify
-- `serializeRangeProof(proof)` / `deserializeRangeProof(json)`: JSON round-trip
+- `createRangeProof(value, min, max, bindingContext?): RangeProof`: prove value is in [min, max]. `max - min` must be at most 2^32 - 1 (else `CryptoError`); value, min and max themselves only need to be non-negative safe integers
+- `verifyRangeProof(proof, expectedMin, expectedMax, expectedBindingContext?): boolean`: verify; never throws
+- `createAgeRangeProof(age, ageRange, subjectPubkey?): RangeProof`: convenience for age policies; `subjectPubkey` is the binding context
+- `verifyAgeRangeProof(proof, expectedAgeRange, expectedSubjectPubkey?): boolean`: verify age proof; never throws
+- `commit(value, blinding?): PedersenCommitment`: create a Pedersen commitment; optional `blinding` is a `bigint` in [1, N-1], the returned `blinding` is 64-character hex
+- `verifyCommitment(commitment, value, blinding): boolean`: open and verify; `blinding` is the hex string, not a bigint
+- `serializeRangeProof(proof): string` / `deserializeRangeProof(json): RangeProof`: JSON round-trip
+
+Age range grammar: `'min-max'` (e.g. `'8-12'`, `'13-17'`) is the inclusive range [min, max]; `'min+'` (e.g. `'18+'`) is [min, 150], the upper bound being fixed at 150. Digits only, no spaces or signs. A malformed string makes `createAgeRangeProof` throw `ValidationError` and `verifyAgeRangeProof` return `false`; inverted bounds (`'12-8'`, `'151+'`) behave the same way.
+
+**Verifier caveat:** `verifyRangeProof` takes the commitment from the proof itself and does not attest whose commitment it is. Callers must anchor `proof.commitment` to externally known state (e.g. a commitment the prover previously published or one bound to their identity) and take the expected range and binding context from their own policy. Do not document or write examples that treat a `true` result alone as proof of who holds the value.
 
 ## Crypto Safety Rules
 
