@@ -7,6 +7,14 @@
 
 # [2.0.0](https://github.com/forgesworn/range-proof/compare/v1.1.0...v2.0.0) (2026-03-30)
 
+## 2.0.5 (2026-10-18)
+
+### Bug Fixes
+
+- align README, llms files and AGENTS.md with the source (#30) (docs)
+
+
+
 ## 2.0.4 (2026-08-08)
 
 ### Bug Fixes
